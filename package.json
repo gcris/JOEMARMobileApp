@@ -1,0 +1,31 @@
+{
+  "name": "pnp-geo-tracker-rn",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-native-clipboard/clipboard": "^1.16.3",
+    "@react-navigation/native": "^7.3.3",
+    "@supabase/supabase-js": "^2.43.0",
+    "expo": "~51.0.0",
+    "expo-location": "~17.0.1",
+    "expo-notifications": "^0.28.19",
+    "expo-status-bar": "~1.12.1",
+    "expo-task-manager": "~11.8.2",
+    "react": "18.2.0",
+    "react-native": "0.74.1",
+    "react-native-vector-icons": "^10.3.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@types/react": "~18.2.45",
+    "react-native-dotenv": "^3.4.11",
+    "typescript": "~5.3.3"
+  },
+  "private": true
+}
