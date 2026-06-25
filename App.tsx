@@ -7,6 +7,9 @@ import {
   TouchableOpacity,
 } from "react-native";
 import * as Notifications from "expo-notifications";
+import { NavigationContainer, RouteProp } from "@react-navigation/native";
+import { createStackNavigator } from "@react-navigation/stack";
+import { StackNavigationProp } from "@react-navigation/stack";
 
 import { usePatrolState } from "./src/hooks/usePatrolState";
 import { getStyles, getThemeColors } from "./src/theme/styles";
@@ -15,6 +18,17 @@ import { RegisterView } from "./src/components/RegisterView";
 import { DashboardView } from "./src/components/DashboardView";
 import { TopCommandHeader } from "./src/components/TopCommandHeader";
 import { AnimatedSplashScreen } from "./src/components/AnimatedSplashScreen";
+import { AccountScreen } from "./src/components/AccountScreen";
+
+type RootStackParamList = {
+  Main: undefined;
+  Account: {
+    personnelId: string;
+    isDarkTheme: boolean;
+  };
+};
+
+const Stack = createStackNavigator<RootStackParamList>();
 
 export default function App() {
   // Police Dark Tactical Theme is active by default to replicate native Android exactly
@@ -85,9 +99,7 @@ export default function App() {
   // If there's no authenticated officer, render target credentials login or register view
   if (!personnel) {
     return (
-      <SafeAreaView
-        style={[styles.container, { backgroundColor: colors.bgDark }]}
-      >
+      <NavigationContainer>
         <StatusBar
           barStyle={isDarkTheme ? "light-content" : "dark-content"}
           backgroundColor={colors.bgDark}
@@ -114,20 +126,74 @@ export default function App() {
             onGoToRegister={() => setViewMode("register")}
           />
         )}
-      </SafeAreaView>
+      </NavigationContainer>
     );
   }
 
   // Once credentials verification is complete, render active tactical screen layout
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.bgDark }]}
-    >
+    <NavigationContainer>
       <StatusBar
         barStyle={isDarkTheme ? "light-content" : "dark-content"}
         backgroundColor={colors.bgDark}
       />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen
+          name="Main"
+          component={() => (
+            <MainApp
+              isDarkTheme={isDarkTheme}
+              handleToggleTheme={handleToggleTheme}
+              logout={logout}
+            />
+          )}
+        />
+        <Stack.Screen name="Account" component={AccountScreenWrapper} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
 
+// Main app component that contains the dashboard and tab navigation
+function MainApp({
+  isDarkTheme,
+  handleToggleTheme,
+  logout,
+}: {
+  isDarkTheme: boolean;
+  handleToggleTheme: () => void;
+  logout: () => void;
+}) {
+  const {
+    personnel,
+    schedule,
+    isShiftActive,
+    isGpsEnabled,
+    foregroundGranted,
+    backgroundGranted,
+    unsyncedCount,
+    logs,
+    isSyncing,
+    toggleShift,
+    syncLogsWithRemote,
+    flushSyncedCache,
+    openSystemSettings,
+    triggerEmergencySOS,
+    autoSync,
+    toggleAutoSync,
+    is2FAEnabled,
+    enable2FA,
+    disable2FA,
+    requestForegroundPermission,
+    requestBackgroundPermission,
+    enableGpsInline,
+  } = usePatrolState();
+
+  const styles = getStyles(isDarkTheme);
+  const colors = getThemeColors(isDarkTheme);
+
+  return (
+    <>
       {/* Replicates TopCommandHeader inside native Compose */}
       <TopCommandHeader
         onLogout={logout}
@@ -182,6 +248,28 @@ export default function App() {
         onRequestBackground={requestBackgroundPermission}
         onEnableGpsInline={enableGpsInline}
       />
-    </SafeAreaView>
+    </>
+  );
+}
+
+// Wrapper for AccountScreen to pass the required props
+function AccountScreenWrapper({
+  navigation,
+  route,
+}: {
+  navigation: StackNavigationProp<RootStackParamList>;
+  route: RouteProp<RootStackParamList, "Account">;
+}) {
+  const { personnelId, isDarkTheme } = route.params || {};
+
+  return (
+    <AccountScreen
+      personnelId={personnelId}
+      isDarkTheme={isDarkTheme}
+      onClose={() => {
+        // Navigate back to main app screen
+        navigation.goBack();
+      }}
+    />
   );
 }

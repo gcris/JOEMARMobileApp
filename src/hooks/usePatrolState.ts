@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { Alert, Linking } from "react-native";
 import * as Location from "expo-location";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import { decode } from "base64-arraybuffer";
+import * as FileSystem from "expo-file-system";
 
 import { Personnel, Schedule, PersonnelLog } from "../types";
 import {
@@ -35,7 +38,7 @@ import {
 
 export const usePatrolState = () => {
   const [personnel, setPersonnel] = useState<Personnel | null>(null);
-  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [schedule, setSchedule] = useState<Schedule[] | null>(null);
   const [logs, setLogs] = useState<PersonnelLog[]>([]);
   const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
 
@@ -556,9 +559,15 @@ export const usePatrolState = () => {
         // Query public.personnel table
         const { data: remoteProfile, error: profileErr } = await supabase
           .from("personnel")
-          .select("*")
+          .select("*, rank(*)")
           .eq("id", authUser.id)
           .single();
+
+        if (profileErr) throw profileErr;
+
+        const scheduleData = await getScheduleByPersonnel(authUser.id);
+
+        setSchedule(scheduleData);
 
         if (remoteProfile) {
           pUser = {
@@ -572,6 +581,7 @@ export const usePatrolState = () => {
             isApproved: remoteProfile.is_approved,
             role: remoteProfile.role,
             email: authUser.email,
+            photo_url: remoteProfile.photo_url, // Add photo URL from database
           };
         } else {
           // If personnel record doesn't exist, return NOT_FOUND (no dynamic profile creation)
@@ -645,7 +655,6 @@ export const usePatrolState = () => {
 
       // Vehicle functionality removed - using personnel only
       const assignedSched = await getScheduleByPersonnel(pUser.id);
-      console.log("assigned Sched: ", assignedSched);
       if (assignedSched) {
         setSchedule(assignedSched);
       }
@@ -952,6 +961,7 @@ export const usePatrolState = () => {
     phone_number: string;
     viber_number: string;
     password?: string;
+    photoUri?: string; // Optional photo URI for upload
   }): Promise<{ success: boolean; message: string }> => {
     try {
       // 1. Verify existence of the personnel via badge_number, rank_id, unit_id, and designation
@@ -966,18 +976,74 @@ export const usePatrolState = () => {
         return {
           success: false,
           message:
-            "No matching personnel record found with the provided Identification metadata (Badge Number, Rank, Unit, and Designation combination). Registration is denied.",
+            "No matching personnel record found with the provided information. Registration is denied.",
         };
       }
 
+      candidate.email = registrationData.email;
+
       // 2. Update the existing candidate record with the new registration details
-      await registerPersonnel(
+      const success = await registerPersonnel(
         candidate.id,
         registrationData.email,
-        registrationData.fullname,
-        registrationData.phone_number,
-        registrationData.viber_number,
+        registrationData.password || "",
+        // registrationData.fullname,
+        // registrationData.phone_number,
+        // registrationData.viber_number,
       );
+
+      if (!success) {
+        return {
+          success: false,
+          message:
+            "Your personnel information already registered. Registration denied.",
+        };
+      }
+
+      // 3. If photo URI is provided, upload the photo to Supabase storage
+      if (registrationData.photoUri) {
+        try {
+          // Resize/compress image for efficiency
+          const resized = await manipulateAsync(
+            registrationData.photoUri,
+            [{ resize: { width: 800 } }],
+            { compress: 0.7, format: SaveFormat.JPEG },
+          );
+          const base64Data = await FileSystem.readAsStringAsync(resized.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          const arrayBuffer = decode(base64Data);
+          const fileName = `${candidate.id}/${Date.now()}.jpg`;
+
+          // Upload the ArrayBuffer instead of the problematic Blob
+          const { data, error } = await supabase.storage
+            .from("personnel-photos")
+            .upload(fileName, arrayBuffer, {
+              contentType: "image/jpeg",
+              upsert: true,
+            });
+
+          if (error) throw error;
+
+          const { data: urlData } = await supabase.storage
+            .from("personnel-photos")
+            .getPublicUrl(data.path);
+
+          const photoUrl = urlData.publicUrl;
+
+          // Update personnel record with photo URL
+          const { error: dbError } = await supabase
+            .from("personnel")
+            .update({ photo_url: photoUrl })
+            .eq("id", candidate.id);
+
+          if (dbError) throw dbError;
+        } catch (photoError) {
+          console.error("Photo upload failed during registration:", photoError);
+          // Don't fail the registration if photo upload fails
+          // Just log the error and continue
+        }
+      }
 
       return {
         success: true,

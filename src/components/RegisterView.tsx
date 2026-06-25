@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { getStyles, getThemeColors } from "../theme/styles";
 import { getRanks, getUnits } from "../services/database";
+import { PersonnelPhotoPicker } from "./PersonnelPhotoPicker";
 
 interface RegisterViewProps {
   onRegister: (data: {
@@ -23,6 +24,7 @@ interface RegisterViewProps {
     phone_number: string;
     viber_number: string;
     password?: string;
+    photoUri: string; // Required photo URI for upload
   }) => Promise<{ success: boolean; message: string }>;
   onBackToLogin: () => void;
   isDarkTheme: boolean;
@@ -58,6 +60,9 @@ export const RegisterView = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | undefined>(
+    undefined,
+  );
 
   // Load ranks and units from SQLite database of PNP
   useEffect(() => {
@@ -86,8 +91,14 @@ export const RegisterView = ({
     setErrorMessage(null);
     setSuccessMessage(null);
 
+    if (!selectedImageUri) {
+      setErrorMessage("Please upload your profile photo.");
+      return;
+    }
+
     // Validate email
     const trimmedEmail = email.trim();
+    console.log(trimmedEmail);
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
       setErrorMessage("Please enter a valid official email address.");
       return;
@@ -153,6 +164,7 @@ export const RegisterView = ({
       phone_number: trimmedPhone,
       viber_number: trimmedViber,
       password: trimmedPassword,
+      photoUri: selectedImageUri!, // Pass the selected image URI (now non-null after validation)
     });
     setLoading(false);
 
@@ -197,14 +209,14 @@ export const RegisterView = ({
           <Text style={{ fontSize: 50, marginBottom: 16 }}>📋</Text>
           <Text
             style={{
-              fontSize: 18,
+              fontSize: 25,
               fontWeight: "bold",
               color: "#10B981",
               textAlign: "center",
               marginBottom: 12,
             }}
           >
-            PROFILE REGISTRATION SUBMITTED
+            Profile Registration Submitted
           </Text>
           <View
             style={{
@@ -219,7 +231,7 @@ export const RegisterView = ({
           <Text
             style={{
               color: isDarkTheme ? "#E2E8F0" : "#0F172A",
-              fontSize: 13,
+              fontSize: 15,
               textAlign: "center",
               lineHeight: 22,
               marginBottom: 20,
@@ -242,7 +254,7 @@ export const RegisterView = ({
             <Text
               style={{
                 color: isDarkTheme ? "#94A3B8" : "#475569",
-                fontSize: 10,
+                fontSize: 15,
                 fontWeight: "bold",
                 letterSpacing: 0.5,
                 marginBottom: 8,
@@ -260,7 +272,7 @@ export const RegisterView = ({
               <Text
                 style={{
                   color: isDarkTheme ? "#64748B" : "#64748B",
-                  fontSize: 11,
+                  fontSize: 15,
                 }}
               >
                 Badge Number:
@@ -268,7 +280,7 @@ export const RegisterView = ({
               <Text
                 style={{
                   color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                  fontSize: 11,
+                  fontSize: 15,
                   fontWeight: "bold",
                 }}
               >
@@ -285,15 +297,15 @@ export const RegisterView = ({
               <Text
                 style={{
                   color: isDarkTheme ? "#64748B" : "#64748B",
-                  fontSize: 11,
+                  fontSize: 15,
                 }}
               >
-                Officer Rank:
+                Rank:
               </Text>
               <Text
                 style={{
                   color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                  fontSize: 11,
+                  fontSize: 15,
                   fontWeight: "bold",
                 }}
               >
@@ -310,15 +322,15 @@ export const RegisterView = ({
               <Text
                 style={{
                   color: isDarkTheme ? "#64748B" : "#64748B",
-                  fontSize: 11,
+                  fontSize: 15,
                 }}
               >
-                District Unit:
+                Unit/Station:
               </Text>
               <Text
                 style={{
                   color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                  fontSize: 11,
+                  fontSize: 15,
                   fontWeight: "bold",
                 }}
               >
@@ -335,15 +347,15 @@ export const RegisterView = ({
               <Text
                 style={{
                   color: isDarkTheme ? "#64748B" : "#64748B",
-                  fontSize: 11,
+                  fontSize: 15,
                 }}
               >
-                Officer Email:
+                Email Address:
               </Text>
               <Text
                 style={{
                   color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                  fontSize: 11,
+                  fontSize: 15,
                   fontWeight: "bold",
                 }}
               >
@@ -363,13 +375,13 @@ export const RegisterView = ({
               <Text
                 style={{
                   color: isDarkTheme ? "#64748B" : "#64748B",
-                  fontSize: 11,
+                  fontSize: 15,
                 }}
               >
-                Status State:
+                Status:
               </Text>
               <Text
-                style={{ color: "#F59E0B", fontSize: 11, fontWeight: "bold" }}
+                style={{ color: "#F59E0B", fontSize: 15, fontWeight: "bold" }}
               >
                 PENDING REVIEW
               </Text>
@@ -388,9 +400,9 @@ export const RegisterView = ({
             onPress={onBackToLogin}
           >
             <Text
-              style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13 }}
+              style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 20 }}
             >
-              RETURN TO OFFICER LOG IN
+              Return to Login
             </Text>
           </TouchableOpacity>
         </View>
@@ -403,31 +415,6 @@ export const RegisterView = ({
       style={{ flex: 1, backgroundColor: colors.bgDark }}
       contentContainerStyle={{ padding: 20 }}
     >
-      {/* Top Bar Navigation back option */}
-      <View
-        style={{ flexDirection: "row", alignItems: "center", marginBottom: 20 }}
-      >
-        <TouchableOpacity
-          style={{
-            paddingVertical: 8,
-            paddingHorizontal: 12,
-            backgroundColor: isDarkTheme ? "#1E293B" : "#CBD5E1",
-            borderRadius: 8,
-          }}
-          onPress={onBackToLogin}
-        >
-          <Text
-            style={{
-              color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-              fontSize: 12,
-              fontWeight: "bold",
-            }}
-          >
-            ← BACK TO LOG IN
-          </Text>
-        </TouchableOpacity>
-      </View>
-
       <View style={{ alignItems: "center", marginBottom: 20 }}>
         <Text
           style={{
@@ -442,15 +429,14 @@ export const RegisterView = ({
         </Text>
         <Text
           style={{
-            fontSize: 11,
+            fontSize: 15,
             color: isDarkTheme ? "#94A3B8" : "#475569",
             textAlign: "center",
             marginTop: 4,
             lineHeight: 16,
           }}
         >
-          Register your official tactical credentials to the district tracking
-          database.
+          Provide the fields below to be able to register.
         </Text>
       </View>
 
@@ -481,21 +467,45 @@ export const RegisterView = ({
             <Text
               style={{
                 color: "#EF4444",
-                fontSize: 11,
+                fontSize: 15,
                 fontWeight: "bold",
                 textAlign: "center",
               }}
             >
-              ❌ {errorMessage}
+              {errorMessage}
             </Text>
           </View>
         )}
+
+        {/* PERSONNEL PHOTO SECTION */}
+        <View style={{ marginBottom: 24 }}>
+          <Text
+            style={{
+              color: isDarkTheme ? "#94A3B8" : "#475569",
+              fontSize: 15,
+              fontWeight: "bold",
+              marginBottom: 6,
+            }}
+          >
+            Profile Photo
+          </Text>
+          <PersonnelPhotoPicker
+            personnelId="temp-id" // Will be replaced with actual ID after registration
+            onPhotoSelected={(uri) => {
+              setSelectedImageUri(uri);
+            }}
+            onPhotoUpdate={() => {
+              // We handle photo upload after registration, so no-op here
+            }}
+            uploadAfterSelect={false} // We'll handle the URI ourselves
+          />
+        </View>
 
         {/* SECTION: AUTH CREDENTIALS */}
         <Text
           style={{
             color: "#3B82F6",
-            fontSize: 10,
+            fontSize: 18,
             fontWeight: "bold",
             letterSpacing: 1,
             textTransform: "uppercase",
@@ -508,18 +518,18 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          OFFICIAL EMAIL ADDRESS
+          Email Address
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 14 }]}
           value={email}
           onChangeText={setEmail}
-          placeholder="e.g. name@pnp.gov.ph"
+          placeholder="e.g. name@gmail.com"
           placeholderTextColor={isDarkTheme ? "#64748B" : "#94A3B8"}
           keyboardType="email-address"
           autoCapitalize="none"
@@ -528,12 +538,12 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          SET COMBAT SECTOR PASSWORD
+          Password
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 20 }]}
@@ -549,7 +559,7 @@ export const RegisterView = ({
         <Text
           style={{
             color: "#3B82F6",
-            fontSize: 10,
+            fontSize: 18,
             fontWeight: "bold",
             letterSpacing: 1,
             textTransform: "uppercase",
@@ -565,18 +575,18 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          OFFICIAL BADGE NUMBER
+          Badge Number
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 14 }]}
           value={badgeNumber}
           onChangeText={setBadgeNumber}
-          placeholder="e.g. PNP-4820-2026"
+          placeholder="e.g. 123456"
           placeholderTextColor={isDarkTheme ? "#64748B" : "#94A3B8"}
           autoCapitalize="characters"
         />
@@ -584,12 +594,12 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          PERSONNEL RANK
+          Rank
         </Text>
         <TouchableOpacity
           style={[
@@ -607,7 +617,7 @@ export const RegisterView = ({
           }}
         >
           <Text
-            style={{ color: isDarkTheme ? "#FFFFFF" : "#0F172A", fontSize: 13 }}
+            style={{ color: isDarkTheme ? "#FFFFFF" : "#0F172A", fontSize: 15 }}
           >
             {activeRankName} {showRankDropdown ? "▲" : "▼"}
           </Text>
@@ -641,7 +651,7 @@ export const RegisterView = ({
                 <Text
                   style={{
                     color: isDarkTheme ? "#94A3B8" : "#475569",
-                    fontSize: 12,
+                    fontSize: 16,
                     fontWeight: rankId === r.id ? "bold" : "normal",
                   }}
                 >
@@ -655,12 +665,12 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          FULL REGISTERED NAME
+          Full name
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 14 }]}
@@ -673,12 +683,12 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          ASSIGNED UNIT DISTRICT
+          Unit/Station
         </Text>
         <TouchableOpacity
           style={[
@@ -696,7 +706,7 @@ export const RegisterView = ({
           }}
         >
           <Text
-            style={{ color: isDarkTheme ? "#FFFFFF" : "#0F172A", fontSize: 13 }}
+            style={{ color: isDarkTheme ? "#FFFFFF" : "#0F172A", fontSize: 16 }}
           >
             {activeUnitName} {showUnitDropdown ? "▲" : "▼"}
           </Text>
@@ -730,7 +740,7 @@ export const RegisterView = ({
                 <Text
                   style={{
                     color: isDarkTheme ? "#94A3B8" : "#475569",
-                    fontSize: 12,
+                    fontSize: 15,
                     fontWeight: unitId === u.id ? "bold" : "normal",
                   }}
                 >
@@ -744,18 +754,18 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          TACTICAL DESIGNATION OR POSITION
+          Designation
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 14 }]}
           value={designation}
           onChangeText={setDesignation}
-          placeholder="e.g. Patrol Officer"
+          placeholder="e.g. Patroller"
           placeholderTextColor={isDarkTheme ? "#64748B" : "#94A3B8"}
         />
 
@@ -763,7 +773,7 @@ export const RegisterView = ({
         <Text
           style={{
             color: "#3B82F6",
-            fontSize: 10,
+            fontSize: 18,
             fontWeight: "bold",
             letterSpacing: 1,
             textTransform: "uppercase",
@@ -773,18 +783,18 @@ export const RegisterView = ({
             paddingTop: 12,
           }}
         >
-          Step 3: Secure communications
+          Step 3: Communications/SIPOT
         </Text>
 
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          MOBILE PHONE NUMBER
+          Mobile Phone Number
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 14 }]}
@@ -798,12 +808,12 @@ export const RegisterView = ({
         <Text
           style={{
             color: isDarkTheme ? "#94A3B8" : "#475569",
-            fontSize: 11,
+            fontSize: 15,
             fontWeight: "bold",
             marginBottom: 6,
           }}
         >
-          VIBER ACCOUNT PHONE NUMBER
+          Viber Account Number
         </Text>
         <TextInput
           style={[styles.input, { marginBottom: 24 }]}
@@ -835,10 +845,10 @@ export const RegisterView = ({
               style={{
                 color: isDarkTheme ? "#0B121F" : "#FFFFFF",
                 fontWeight: "bold",
-                fontSize: 15,
+                fontSize: 20,
               }}
             >
-              Register & Request Profile Approval
+              Register
             </Text>
           )}
         </TouchableOpacity>
@@ -855,12 +865,12 @@ export const RegisterView = ({
         >
           <Text
             style={{
-              color: isDarkTheme ? "#94A3B8" : "#475569",
+              fontSize: 18,
               fontWeight: "bold",
-              fontSize: 12,
+              color: isDarkTheme ? "#3B82F6" : "#1D4ED8",
             }}
           >
-            CANCEL & RETURN TO LOG IN
+            Sign in me instead
           </Text>
         </TouchableOpacity>
       </View>

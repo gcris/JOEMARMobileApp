@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from "./supabase";
+import { supabase, supabaseAdmin, isSupabaseConfigured } from "./supabase";
 import { Personnel, Schedule, PersonnelLog } from "../types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -36,6 +36,7 @@ export const getPersonnelByBadge = async (
       isApproved: data.is_approved,
       role: data.role,
       email: data.email,
+      photo_url: data.photo_url, // Add photo URL
     };
   } catch (error) {
     console.error("Error fetching personnel by badge:", error);
@@ -75,6 +76,7 @@ export const getPersonnelByEmail = async (
       isApproved: data.is_approved,
       role: data.role,
       email: data.email,
+      photo_url: data.photo_url, // Add photo URL
     };
   } catch (error) {
     console.error("Error fetching personnel by email:", error);
@@ -91,14 +93,14 @@ export const findCandidatePersonnel = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select(
-        "*, rank(*), unit(*), patrol_schedule(*, schedule_assignments(*))",
-      )
+      .select("*")
       .eq("badge_number", badgeNumber.toUpperCase())
       .eq("rank_id", rankId)
       .eq("unit_id", unitId)
       .ilike("designation", `%${designation}%`)
       .single();
+
+    console.log(badgeNumber, rankId, unitId, designation);
 
     if (error && error.code !== "PGRST116") {
       throw error;
@@ -119,7 +121,8 @@ export const findCandidatePersonnel = async (
       viberNumber: data.viber_number,
       isApproved: data.is_approved,
       role: data.role,
-      email: data.email,
+      // email: data.email,
+      photo_url: data.photo_url, // Add photo URL
     };
   } catch (error) {
     console.error("Error finding candidate personnel:", error);
@@ -159,6 +162,7 @@ export const getPersonnelById = async (
       isApproved: data.is_approved,
       role: data.role,
       email: data.email,
+      photo_url: data.photo_url, // Add photo URL
     };
   } catch (error) {
     console.error("Error fetching personnel by ID:", error);
@@ -182,6 +186,7 @@ export const savePersonnel = async (p: Personnel): Promise<void> => {
         is_approved: p.isApproved ? 1 : 0,
         role: p.role,
         email: p.email,
+        photo_url: p.photo_url, // Add photo URL
       },
       {
         onConflict: "id",
@@ -202,13 +207,13 @@ export const getRanks = async (): Promise<
   try {
     const { data, error } = await supabase
       .from("rank")
-      .select("id, rank_name")
-      .order("rank_name");
+      .select("*")
+      .order("level", { ascending: true });
 
     if (error) throw error;
     return (data || []).map((rank) => ({
       id: rank.id,
-      rankName: rank.rank_name,
+      rankName: rank.rank_name + " (" + rank.description + ")",
     }));
   } catch (error) {
     console.error("Error fetching ranks:", error);
@@ -223,6 +228,7 @@ export const getUnits = async (): Promise<
     const { data, error } = await supabase
       .from("unit")
       .select("id, unit_name")
+      .eq("level", 1)
       .order("unit_name");
 
     if (error) throw error;
@@ -258,13 +264,13 @@ export const getUnitById = async (unitId: string): Promise<any> => {
 // --- Schedule Operations ---
 export const getScheduleByPersonnel = async (
   personnelId: string,
-): Promise<Schedule | null> => {
+): Promise<Schedule[] | null> => {
   try {
     const { data, error } = await supabase
       .from("patrol_schedule")
-      .select("*, schedule_assignments (*)")
+      .select("*, schedule_assignments (*, personnel(*, rank(*)))")
       .eq("schedule_assignments.personnel_id", personnelId)
-      .single();
+      .eq("date", new Date().toISOString().split("T")[0]);
 
     if (error && error.code !== "PGRST116") {
       throw error;
@@ -272,15 +278,29 @@ export const getScheduleByPersonnel = async (
 
     if (!data) return null;
 
-    return {
-      id: data.id,
-      date: data.date,
-      timeFrom: data.time_from,
-      timeTo: data.time_to,
-      sector: data.sector,
-      unitId: data.unit_id,
-      personnelId: data.personnel_id,
-    };
+    return data.map((item) => {
+      // Map through all assignments for this specific shift row
+      const assignedOfficers = (item.schedule_assignments || []).map(
+        (assignment: any) => ({
+          rank_name: assignment.personnel?.rank?.rank_name || "Unranked",
+          fullname: assignment.personnel?.fullname || "Unknown Personnel",
+          phone_number: assignment.personnel?.phone_number,
+          viber_number: assignment.personnel?.viber_number,
+        }),
+      );
+
+      return {
+        id: item.id,
+        date: item.date,
+        timeFrom: item.time_from,
+        timeTo: item.time_to,
+        sector: item.sector,
+        duty_type: item.patrol_type,
+        unitId: item.unit_id,
+        personnelId: personnelId,
+        personnel: assignedOfficers, // This is now a clean array of all assigned personnel
+      };
+    });
   } catch (error) {
     console.error("Error fetching schedule by personnel:", error);
     return null;
@@ -311,9 +331,15 @@ export const insertPersonnelLog = async (log: PersonnelLog): Promise<void> => {
       }
 
       // If Supabase fails, fall back to local storage
-      console.warn("Failed to insert log into Supabase, falling back to local storage:", error);
+      console.warn(
+        "Failed to insert log into Supabase, falling back to local storage:",
+        error,
+      );
     } catch (error) {
-      console.warn("Failed to insert log into Supabase, falling back to local storage:", error);
+      console.warn(
+        "Failed to insert log into Supabase, falling back to local storage:",
+        error,
+      );
     }
   }
 
@@ -321,7 +347,9 @@ export const insertPersonnelLog = async (log: PersonnelLog): Promise<void> => {
   try {
     // Get existing logs from local storage
     const existingLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
-    const existingLogs: PersonnelLog[] = existingLogsJson ? JSON.parse(existingLogsJson) : [];
+    const existingLogs: PersonnelLog[] = existingLogsJson
+      ? JSON.parse(existingLogsJson)
+      : [];
 
     // Add new log
     const updatedLogs = [...existingLogs, log];
@@ -338,10 +366,12 @@ export const getUnsyncedLogs = async (): Promise<PersonnelLog[]> => {
   try {
     // Get unsynced logs from local storage
     const localLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
-    const localLogs: PersonnelLog[] = localLogsJson ? JSON.parse(localLogsJson) : [];
+    const localLogs: PersonnelLog[] = localLogsJson
+      ? JSON.parse(localLogsJson)
+      : [];
 
     // Filter to only unsynced logs from local storage
-    const unsyncedLocalLogs = localLogs.filter(log => !log.isSynced);
+    const unsyncedLocalLogs = localLogs.filter((log) => !log.isSynced);
 
     return unsyncedLocalLogs;
   } catch (error) {
@@ -378,12 +408,15 @@ export const getLatestLogs = async (limit = 100): Promise<PersonnelLog[]> => {
 
     // Get logs from local storage
     const localLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
-    const localLogs: PersonnelLog[] = localLogsJson ? JSON.parse(localLogsJson) : [];
+    const localLogs: PersonnelLog[] = localLogsJson
+      ? JSON.parse(localLogsJson)
+      : [];
 
     // Combine Supabase and local logs, then sort by capturedAt descending and limit
     const allLogs = [...supabaseLogs, ...localLogs];
     const sortedLogs = allLogs.sort(
-      (a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime()
+      (a, b) =>
+        new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime(),
     );
 
     return sortedLogs.slice(0, limit);
@@ -397,10 +430,12 @@ export const getUnsyncedCount = async (): Promise<number> => {
   try {
     // Get unsynced count from local storage
     const localLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
-    const localLogs: PersonnelLog[] = localLogsJson ? JSON.parse(localLogsJson) : [];
+    const localLogs: PersonnelLog[] = localLogsJson
+      ? JSON.parse(localLogsJson)
+      : [];
 
     // Count unsynced logs from local storage
-    const unsyncedCount = localLogs.filter(log => !log.isSynced).length;
+    const unsyncedCount = localLogs.filter((log) => !log.isSynced).length;
 
     return unsyncedCount;
   } catch (error) {
@@ -415,11 +450,13 @@ export const markLogsAsSynced = async (logIds: string[]): Promise<void> => {
   try {
     // Get existing logs from local storage
     const existingLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
-    const existingLogs: PersonnelLog[] = existingLogsJson ? JSON.parse(existingLogsJson) : [];
+    const existingLogs: PersonnelLog[] = existingLogsJson
+      ? JSON.parse(existingLogsJson)
+      : [];
 
     // Mark specified logs as synced
-    const updatedLogs = existingLogs.map(log =>
-      logIds.includes(log.id) ? { ...log, isSynced: true } : log
+    const updatedLogs = existingLogs.map((log) =>
+      logIds.includes(log.id) ? { ...log, isSynced: true } : log,
     );
 
     // Save back to local storage
@@ -434,10 +471,12 @@ export const cleanSyncedLogs = async (): Promise<void> => {
   try {
     // Get existing logs from local storage
     const existingLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
-    const existingLogs: PersonnelLog[] = existingLogsJson ? JSON.parse(existingLogsJson) : [];
+    const existingLogs: PersonnelLog[] = existingLogsJson
+      ? JSON.parse(existingLogsJson)
+      : [];
 
     // Filter out synced logs (keep only unsynced ones)
-    const unsyncedLogs = existingLogs.filter(log => !log.isSynced);
+    const unsyncedLogs = existingLogs.filter((log) => !log.isSynced);
 
     // Save back to local storage (only unsynced logs remain)
     await AsyncStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(unsyncedLogs));
@@ -451,30 +490,48 @@ export const cleanSyncedLogs = async (): Promise<void> => {
 export const registerPersonnel = async (
   id: string,
   email: string,
-  fullname?: string,
-  phoneNumber?: string,
-  viberNumber?: string,
-): Promise<void> => {
+  password: string,
+  // fullname?: string,
+  // phoneNumber?: string,
+  // viberNumber?: string,
+  // photoUrl?: string, // Add photoUrl parameter
+): Promise<boolean> => {
   try {
     // Note: password handling is done through Supabase Auth, not stored in public table
     // This function updates the public.personnel table with non-sensitive profile data
-    const updates: any = {
-      email: email.trim().toLowerCase(),
-      fullname: fullname || "",
-    };
+    const { data: existingAuthUser, error: fetchError } =
+      await supabaseAdmin.auth.admin.getUserById(id);
 
-    if (phoneNumber) updates.phone_number = phoneNumber;
-    if (viberNumber) updates.viber_number = viberNumber;
+    if (existingAuthUser.user) {
+      return false;
+    }
+    const { error } = await supabaseAdmin.auth.admin.createUser({
+      id: id,
+      email: email,
+      password: password,
+      email_confirm: true,
+    });
 
-    // Set isApproved to false (0) for new registrations pending approval
-    updates.is_approved = false;
+    if (error) return false;
+    return true;
+    // if (signUpError) throw signUpError;
 
-    const { error } = await supabase
-      .from("personnel")
-      .update(updates)
-      .eq("id", id);
+    // const updates: any = {
+    //   //email: email.trim().toLowerCase(),
+    //   fullname: fullname || "",
+    // };
 
-    if (error) throw error;
+    // if (phoneNumber) updates.phone_number = phoneNumber;
+    // if (viberNumber) updates.viber_number = viberNumber;
+    // if (photoUrl) updates.photo_url = photoUrl; // Add photo URL to updates
+
+    // // Set isApproved to false (0) for new registrations pending approval
+    // updates.is_approved = false;
+
+    // const { error } = await supabase
+    //   .from("personnel")
+    //   .update(updates)
+    //   .eq("id", id);
   } catch (error) {
     console.error("Error registering personnel:", error);
     throw error;

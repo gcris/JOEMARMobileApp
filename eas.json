@@ -15,7 +15,8 @@
     "production": {
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://wxqbngmfovgqpyboriru.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4cWJuZ21mb3ZncXB5Ym9yaXJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNTEyMDcsImV4cCI6MjA5NTYyNzIwN30.eI7XWhwmyEbuMvYwX-sEF0lGJD-hImZ67lboX-zVthE"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4cWJuZ21mb3ZncXB5Ym9yaXJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNTEyMDcsImV4cCI6MjA5NTYyNzIwN30.eI7XWhwmyEbuMvYwX-sEF0lGJD-hImZ67lboX-zVthE",
+        "EXPO_PUBLIC_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4cWJuZ21mb3ZncXB5Ym9yaXJ1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDA1MTIwNywiZXhwIjoyMDk1NjI3MjA3fQ.ryKi99eK7QGFsEe3LRkhp67HT4pJtUQ165OivJW10jk"
       },
       "android": {
         "gradleCommand": ":app:assembleRelease"

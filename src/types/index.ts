@@ -18,6 +18,7 @@ export interface Personnel {
   isApproved: boolean;
   role: string;
   email?: string;
+  photo_url?: string; // URL to the personnel's photo in Supabase storage
 }
 
 export interface Unit {
@@ -43,6 +44,22 @@ export interface Schedule {
   timeFrom: string;
   timeTo: string;
   sector: string;
+  duty_type: string;
   unitId: string;
   personnelId: string;
+  personnel: Array<{
+    rank_name: string;
+    fullname: string;
+    phone_number: string;
+    viber_number: string;
+  }>;
+}
+
+// Navigation types
+export interface RootStackParamList {
+  Main: undefined;
+  Account: {
+    personnelId: string;
+    isDarkTheme: boolean;
+  };
 }

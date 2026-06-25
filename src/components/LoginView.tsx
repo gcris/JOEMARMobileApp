@@ -558,6 +558,41 @@ export const LoginView = ({
             </View>
           )}
 
+        {pendingState && (
+          <View
+            style={{
+              width: "100%",
+              backgroundColor: isDarkTheme
+                ? "rgba(20,32,53,0.95)"
+                : "rgba(255,255,255,0.95)",
+              borderWidth: 1,
+              borderColor: "#1E3A8A",
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 16,
+              alignItems: "center",
+            }}
+          >
+            <Ionicons
+              name="lock-closed"
+              size={32}
+              color={isDarkTheme ? "yellow" : "#000000"}
+            />
+            <Text
+              style={{
+                fontSize: 16,
+                color: isDarkTheme ? "#94A3B8" : "#000000",
+                textAlign: "center",
+                lineHeight: 16,
+                marginTop: 6,
+              }}
+            >
+              You are marked as PENDING APPROVAL. Please contact the
+              administrator.
+            </Text>
+          </View>
+        )}
+
         {step === "credentials" ? (
           <View
             style={[
@@ -627,7 +662,7 @@ export const LoginView = ({
                 }}
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => setEmailFocused(false)}
-                placeholder="officer@pnp.gov.ph"
+                placeholder="e.g. name@gmail.com"
                 placeholderTextColor="rgba(148,163,184,0.6)"
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -790,7 +825,7 @@ export const LoginView = ({
               >
                 <Text
                   style={{
-                    fontSize: 15,
+                    fontSize: 18,
                     fontWeight: "bold",
                     color: isDarkTheme ? "#3B82F6" : "#1D4ED8",
                   }}
@@ -1053,41 +1088,6 @@ export const LoginView = ({
                 ◀ GO BACK TO SHIELD HEADER
               </Text>
             </TouchableOpacity>
-          </View>
-        )}
-
-        {pendingState && (
-          <View
-            style={{
-              width: "100%",
-              backgroundColor: isDarkTheme
-                ? "rgba(20,32,53,0.95)"
-                : "rgba(255,255,255,0.95)",
-              borderWidth: 1,
-              borderColor: "#1E3A8A",
-              borderRadius: 12,
-              padding: 16,
-              marginTop: 16,
-              alignItems: "center",
-            }}
-          >
-            <Ionicons
-              name="lock-closed"
-              size={32}
-              color={isDarkTheme ? "yellow" : "gray"}
-            />
-            <Text
-              style={{
-                fontSize: 16,
-                color: isDarkTheme ? "#94A3B8" : "#475569",
-                textAlign: "center",
-                marginTop: 4,
-                lineHeight: 16,
-              }}
-            >
-              You are marked as PENDING APPROVAL. Please contact the
-              administrator.
-            </Text>
           </View>
         )}
       </View>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,13 +8,16 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-} from 'react-native';
-import { getStyles, getThemeColors } from '../theme/styles';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { supabase } from '../services/supabase';
-import { getPersonnelById, savePersonnel } from '../services/database';
-import { useNavigation, NavigationProp } from '@react-navigation/native';
-import { RootStackParamList } from '../../types';
+} from "react-native";
+import { getStyles, getThemeColors } from "../theme/styles";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { supabase } from "../services/supabase";
+import { getPersonnelById, savePersonnel } from "../services/database";
+import { useNavigation, NavigationProp } from "@react-navigation/native";
+
+// Fix: Removed the problematic import from '../../types'
+// and replaced with proper navigation types
+import type { RootStackParamList } from "../types/index";
 
 interface AccountScreenProps {
   personnelId: string;
@@ -22,7 +25,11 @@ interface AccountScreenProps {
   onClose: () => void;
 }
 
-export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScreenProps) => {
+export const AccountScreen = ({
+  personnelId,
+  isDarkTheme,
+  onClose,
+}: AccountScreenProps) => {
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -32,9 +39,9 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Form fields
-  const [fullname, setFullname] = useState<string>('');
-  const [phoneNumber, setPhoneNumber] = useState<string>('');
-  const [viberNumber, setViberNumber] = useState<string>('');
+  const [fullname, setFullname] = useState<string>("");
+  const [phoneNumber, setPhoneNumber] = useState<string>("");
+  const [viberNumber, setViberNumber] = useState<string>("");
 
   // Load personnel data
   useEffect(() => {
@@ -44,13 +51,13 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
         const personnelData = await getPersonnelById(personnelId);
         if (personnelData) {
           setPersonnel(personnelData);
-          setFullname(personnelData.fullname || '');
-          setPhoneNumber(personnelData.phoneNumber || '');
-          setViberNumber(personnelData.viberNumber || '');
+          setFullname(personnelData.fullname || "");
+          setPhoneNumber(personnelData.phoneNumber || "");
+          setViberNumber(personnelData.viberNumber || "");
         }
       } catch (error) {
-        console.error('Error loading personnel:', error);
-        Alert.alert('Error', 'Failed to load personnel data');
+        console.error("Error loading personnel:", error);
+        Alert.alert("Error", "Failed to load personnel data");
       } finally {
         setIsLoading(false);
       }
@@ -79,11 +86,11 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
         ...updates,
       });
 
-      Alert.alert('Success', 'Personnel information updated successfully');
+      Alert.alert("Success", "Personnel information updated successfully");
       onClose();
     } catch (error) {
-      console.error('Error saving personnel:', error);
-      Alert.alert('Error', 'Failed to save personnel information');
+      console.error("Error saving personnel:", error);
+      Alert.alert("Error", "Failed to save personnel information");
     } finally {
       setIsSaving(false);
     }
@@ -91,7 +98,7 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" color={colors.accentAmber} />
       </View>
     );
@@ -105,27 +112,32 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
     >
       {/* Header */}
       <View style={{ marginBottom: 30 }}>
-        <TouchableOpacity
-          style={{ padding: 10 }}
-          onPress={onClose}
-        >
-          <Ionicons name="chevron-back-outline" size={28} color={colors.textSecondary} />
+        <TouchableOpacity style={{ padding: 10 }} onPress={onClose}>
+          <Ionicons
+            name="chevron-back-outline"
+            size={28}
+            color={colors.textSecondary}
+          />
         </TouchableOpacity>
-        <Text style={{
-          fontSize: 24,
-          fontWeight: 'bold',
-          textAlign: 'center',
-          color: colors.blackText,
-          marginVertical: 10
-        }}>
+        <Text
+          style={{
+            fontSize: 24,
+            fontWeight: "bold",
+            textAlign: "center",
+            color: colors.blackText,
+            marginVertical: 10,
+          }}
+        >
           Account Settings
         </Text>
-        <Text style={{
-          fontSize: 14,
-          textAlign: 'center',
-          color: colors.textSecondary,
-          marginBottom: 5
-        }}>
+        <Text
+          style={{
+            fontSize: 14,
+            textAlign: "center",
+            color: colors.textSecondary,
+            marginBottom: 5,
+          }}
+        >
           Edit your profile information
         </Text>
       </View>
@@ -134,18 +146,20 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
       <View style={{ marginBottom: 30 }}>
         {/* Full Name */}
         <View style={{ marginBottom: 20 }}>
-          <Text style={{
-            fontSize: 16,
-            fontWeight: '600',
-            color: colors.blackText,
-            marginBottom: 8
-          }}>
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: "600",
+              color: colors.blackText,
+              marginBottom: 8,
+            }}
+          >
             Full Name
           </Text>
           <TextInput
             style={[
               styles.input,
-              { borderWidth: 1, borderColor: colors.borderBlue }
+              { borderWidth: 1, borderColor: colors.borderBlue },
             ]}
             value={fullname}
             onChangeText={setFullname}
@@ -156,18 +170,20 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
 
         {/* Phone Number */}
         <View style={{ marginBottom: 20 }}>
-          <Text style={{
-            fontSize: 16,
-            fontWeight: '600',
-            color: colors.blackText,
-            marginBottom: 8
-          }}>
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: "600",
+              color: colors.blackText,
+              marginBottom: 8,
+            }}
+          >
             Phone Number
           </Text>
           <TextInput
             style={[
               styles.input,
-              { borderWidth: 1, borderColor: colors.borderBlue }
+              { borderWidth: 1, borderColor: colors.borderBlue },
             ]}
             value={phoneNumber}
             onChangeText={setPhoneNumber}
@@ -178,18 +194,20 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
 
         {/* Viber Number */}
         <View style={{ marginBottom: 20 }}>
-          <Text style={{
-            fontSize: 16,
-            fontWeight: '600',
-            color: colors.blackText,
-            marginBottom: 8
-          }}>
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: "600",
+              color: colors.blackText,
+              marginBottom: 8,
+            }}
+          >
             Viber Number
           </Text>
           <TextInput
             style={[
               styles.input,
-              { borderWidth: 1, borderColor: colors.borderBlue }
+              { borderWidth: 1, borderColor: colors.borderBlue },
             ]}
             value={viberNumber}
             onChangeText={setViberNumber}
@@ -200,10 +218,11 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
       </View>
 
       {/* Save Button */}
+      {/* FIXED: Changed from styles.buttonPrimary to styles.submitBtn (which exists) */}
       <TouchableOpacity
         style={[
-          styles.buttonPrimary,
-          { marginHorizontal: 20, marginBottom: 20 }
+          styles.submitBtn, // Changed from styles.buttonPrimary to styles.submitBtn
+          { marginHorizontal: 20, marginBottom: 20 },
         ]}
         onPress={handleSave}
         disabled={isSaving}
@@ -211,23 +230,22 @@ export const AccountScreen = ({ personnelId, isDarkTheme, onClose }: AccountScre
         {isSaving ? (
           <ActivityIndicator size="small" color="white" />
         ) : (
-          <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' }}>
+          <Text style={{ fontSize: 16, fontWeight: "bold", color: "#FFFFFF" }}>
             Save Changes
           </Text>
         )}
       </TouchableOpacity>
 
       {/* Cancel Button */}
-      <TouchableOpacity
-        style={{ marginHorizontal: 20 }}
-        onPress={onClose}
-      >
-        <Text style={{
-          fontSize: 16,
-          color: colors.accentAmber,
-          textAlign: 'center',
-          fontWeight: '600'
-        }}>
+      <TouchableOpacity style={{ marginHorizontal: 20 }} onPress={onClose}>
+        <Text
+          style={{
+            fontSize: 16,
+            color: colors.accentAmber,
+            textAlign: "center",
+            fontWeight: "600",
+          }}
+        >
           Cancel
         </Text>
       </TouchableOpacity>

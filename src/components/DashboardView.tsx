@@ -10,16 +10,18 @@ import {
   Alert,
   Image,
   TextInput,
+  Linking,
+  StyleSheet,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { Personnel, PersonnelLog, Schedule } from "../types";
 import { getStyles, getThemeColors } from "../theme/styles";
-import { generateRandomSecret, getOTPAuthUri } from "../services/totp";
 import { enrollMFA } from "../services/supabaseMFA";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 interface DashboardViewProps {
   personnel: Personnel | null;
-  schedule: Schedule | null;
+  schedule: Schedule[] | null;
   isShiftActive: boolean;
   isGpsEnabled: boolean;
   unsyncedCount: number;
@@ -77,6 +79,7 @@ export const DashboardView = ({
 }: DashboardViewProps) => {
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
+  const navigation = useNavigation<any>();
 
   // Navigation state for bottom navigation bar: home, sos, account
   const [activeNav, setActiveNav] = useState<"home" | "sos" | "account">(
@@ -148,6 +151,50 @@ export const DashboardView = ({
         { text: "Cancel", style: "cancel" },
       ],
     );
+  };
+
+  const handlePhoneCall = (phoneNumber: string) => {
+    if (!phoneNumber) return;
+    // tel: protocol opens the device's native dialer automatically
+    const url = `tel:${phoneNumber.replace(/\s+/g, "")}`;
+    Linking.canOpenURL(url)
+      .then((supported) => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          Alert.alert("Error", "Phone calls are not supported on this device.");
+        }
+      })
+      .catch((err) => console.error("Linking error:", err));
+  };
+
+  const handleViberCall = (viberNumber: string) => {
+    if (!viberNumber) return;
+    // Clean the number (remove spaces and the '+' symbol if present for the URI protocol)
+    const cleanNumber = viberNumber.replace(/[\s+]+/g, "");
+    // viber://contact?number= protocol launches the native Viber application
+    const url = `viber://contact?number=%2B${cleanNumber}`;
+
+    Linking.canOpenURL(url)
+      .then((supported) => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          // Fallback: If the app isn't installed, prompt them or open via web link
+          Alert.alert(
+            "Viber Not Found",
+            "Viber app is not installed on this device. Redirecting to web...",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Open Web",
+                onPress: () => Linking.openURL(`https://invite.viber.com/`),
+              },
+            ],
+          );
+        }
+      })
+      .catch((err) => console.error("Viber linking error:", err));
   };
 
   return (
@@ -354,6 +401,7 @@ export const DashboardView = ({
           style={[styles.card, { paddingVertical: 12, paddingHorizontal: 16 }]}
         >
           <View style={{ flexDirection: "row", alignItems: "center" }}>
+            {/* Personnel Photo */}
             <View
               style={{
                 width: 48,
@@ -364,13 +412,21 @@ export const DashboardView = ({
                 borderColor: colors.borderBlue,
                 justifyContent: "center",
                 alignItems: "center",
+                overflow: "hidden", // Important for circular clipping
               }}
             >
-              <Ionicons
-                name="person"
-                size={45}
-                color={isDarkTheme ? "white" : "black"}
-              />
+              {personnel?.photo_url ? (
+                <Image
+                  source={{ uri: personnel.photo_url }}
+                  style={{ width: "100%", height: "100%", resizeMode: "cover" }}
+                />
+              ) : (
+                <Ionicons
+                  name="person"
+                  size={45}
+                  color={isDarkTheme ? "white" : "black"}
+                />
+              )}
             </View>
             <View style={{ marginLeft: 14, flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -547,84 +603,272 @@ export const DashboardView = ({
             {/* CONSOLIDATED PNP ASSIGNED DUTY CONSOLE & INSTRUCTIONS */}
             <View style={styles.card}>
               <Text style={styles.cardHeading}>PATROL SCHEDULE</Text>
-              {schedule ? (
-                <View style={{ gap: 10 }}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 12,
-                    }}
-                  >
-                    <Text style={{ fontSize: 16, color: colors.textSecondary }}>
-                      Sector:
-                    </Text>
-                    <Text
+              {schedule && schedule.length > 0 ? (
+                // Wrap the list in a container View
+                <View style={{ gap: 16 }}>
+                  {schedule.map((item, index) => (
+                    <View
+                      key={item.id || index} // Unique key identifier for the React fiber tree
                       style={{
-                        fontSize: 16,
-                        fontWeight: "700", // Fixed TypeScript weight constraint
-                        color: colors.blackText,
-                        flexShrink: 1, // Allows the value to shrink and wrap instead of overflowing
-                        textAlign: "right",
+                        gap: 10,
+                        padding: 12,
+                        backgroundColor: isDarkTheme ? "#1B2C24" : "#E6F4EA",
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: colors.borderBlue + "22", // Subtle transparent border
                       }}
                     >
-                      {schedule?.sector}
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      borderTopWidth: 0.5,
-                      borderTopColor: colors.borderBlue,
-                      paddingTop: 8,
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>
-                      Duration of Duty:
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "bold",
-                        color: colors.blackText,
-                      }}
-                    >
-                      {schedule.date}
-                      {" from "}
-                      {schedule.timeFrom}
-                      {" to "}
-                      {schedule.timeTo}
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      borderTopWidth: 0.5,
-                      borderTopColor: colors.borderBlue,
-                      paddingTop: 8,
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>
-                      Force Scheduled Date:
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "bold",
-                        color: colors.blackText,
-                      }}
-                    >
-                      {new Date().toISOString().split("T")[0]}
-                    </Text>
-                  </View>
+                      {/* Sector Row */}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: 12,
+                        }}
+                      >
+                        <Text
+                          style={{ fontSize: 18, color: colors.textPrimary }}
+                        >
+                          Sector:
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "700",
+                            color: colors.blackText,
+                            flexShrink: 1,
+                            textAlign: "right",
+                          }}
+                        >
+                          {item.sector}
+                        </Text>
+                      </View>
+
+                      {/* Duty Type Row */}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: 12,
+                        }}
+                      >
+                        <Text
+                          style={{ fontSize: 18, color: colors.textPrimary }}
+                        >
+                          Duty Type:
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "700",
+                            color: colors.blackText,
+                            flexShrink: 1,
+                            textAlign: "right",
+                          }}
+                        >
+                          {item.duty_type}
+                        </Text>
+                      </View>
+
+                      {/* Force Scheduled Date Row */}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          borderTopWidth: 0.5,
+                          borderTopColor: colors.borderBlue,
+                        }}
+                      >
+                        <Text
+                          style={{ fontSize: 18, color: colors.textPrimary }}
+                        >
+                          Scheduled Date:
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "bold",
+                            color: colors.blackText,
+                          }}
+                        >
+                          {new Date().toISOString().split("T")[0]}
+                        </Text>
+                      </View>
+
+                      {/* Duration of Duty Row */}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          borderTopWidth: 0.5,
+                          borderTopColor: colors.borderBlue,
+                        }}
+                      >
+                        <Text
+                          style={{ fontSize: 18, color: colors.textPrimary }}
+                        >
+                          Duration of Duty:
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "bold",
+                            color: colors.blackText,
+                          }}
+                        >
+                          {item.timeFrom}
+                          {" to "}
+                          {item.timeTo}
+                        </Text>
+                      </View>
+
+                      {/* Assigned Personnel Row */}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          borderTopWidth: 0.5,
+                          borderTopColor: colors.borderBlue,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "bold",
+                            color: colors.textPrimary,
+                          }}
+                        >
+                          Assigned Personnel
+                        </Text>
+                      </View>
+                      {item.personnel && item.personnel.length > 0 && (
+                        <View
+                          style={{
+                            flexDirection: "column",
+                            justifyContent: "space-between",
+                            borderTopWidth: 0.5,
+                            borderTopColor: colors.borderBlue,
+                          }}
+                        >
+                          {item.personnel.map((pItem, pIndex) => (
+                            <View
+                              key={pIndex}
+                              style={{
+                                flexDirection: "column",
+                                gap: 8,
+                                borderTopWidth: 0.5,
+                                borderTopColor: colors.borderBlue,
+                              }}
+                            >
+                              {/* Row 1: Rank and Fullname */}
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  justifyContent: "space-between",
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontSize: 18,
+                                    fontWeight: "bold",
+                                    color: colors.textPrimary,
+                                  }}
+                                >
+                                  {pItem.rank_name} {pItem.fullname}
+                                </Text>
+                              </View>
+
+                              {/* Row 2: Touch-Target Action Links */}
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                }}
+                              >
+                                {/* Clickable Mobile Phone Action Link */}
+                                <TouchableOpacity
+                                  onPress={() =>
+                                    handlePhoneCall(pItem.phone_number)
+                                  }
+                                  disabled={!pItem.phone_number}
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center", // Vertically centers icon and text inside phone link
+                                    gap: 6, // Adds perfect spacing between the call icon and the string
+                                  }}
+                                >
+                                  <Ionicons
+                                    name="call"
+                                    size={20}
+                                    color={colors.textPrimary}
+                                  />
+                                  <Text
+                                    style={{
+                                      fontSize: 20,
+                                      color: colors.textPrimary,
+                                      includeFontPadding: false, // Prevents native Android font layout offsets
+                                    }}
+                                  >
+                                    {pItem.phone_number || "N/A"}
+                                  </Text>
+                                </TouchableOpacity>
+
+                                {/* Clickable Viber Action Link */}
+                                <TouchableOpacity
+                                  onPress={() =>
+                                    handleViberCall(pItem.viber_number)
+                                  }
+                                  disabled={!pItem.viber_number}
+                                  activeOpacity={0.6}
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center", // Vertically centers text inside Viber link
+                                    gap: 4,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontSize: 13,
+                                      color: pItem.viber_number
+                                        ? "#7360F2"
+                                        : colors.textSecondary,
+                                      textAlign: "right",
+                                      includeFontPadding: false,
+                                    }}
+                                  >
+                                    <Ionicons
+                                      name="chatbox"
+                                      size={20}
+                                      color="#7360F2"
+                                    />
+                                    <Text
+                                      style={{
+                                        fontSize: 20,
+                                        color: "#7360F2",
+                                        includeFontPadding: false, // Prevents native Android font layout offsets
+                                      }}
+                                    >
+                                      {pItem.viber_number || "N/A"}
+                                    </Text>
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  ))}
                 </View>
               ) : (
-                <Text style={styles.emptyTableText}>
-                  No records of schedule. Contact your encoder.
-                </Text>
+                <View style={{ padding: 20, alignItems: "center" }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+                    No active duty schedules assigned.
+                  </Text>
+                </View>
               )}
             </View>
           </View>
@@ -717,434 +961,6 @@ export const DashboardView = ({
             </View>
           </View>
         )}
-
-        {/* TAB VALUE 2: FORCE TOOLS & SECURITY CONTROL SHIELD */}
-        {activeNav === "account" && (
-          <View style={{ width: "100%" }}>
-            {/* SUPABASE MULTI-FACTOR AUTHENTICATION (MFA) CARD */}
-            <View style={styles.card}>
-              <Text style={styles.cardHeading}>
-                🛡️ SUPABASE MULTI-FACTOR AUTHENTICATION (MFA)
-              </Text>
-
-              {is2FAEnabled && !isSettingUp2FA ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    backgroundColor: isDarkTheme ? "#1B2C24" : "#E6F4EA",
-                    padding: 12,
-                    borderRadius: 8,
-                    marginBottom: 14,
-                  }}
-                >
-                  <Text style={{ fontSize: 28, marginRight: 12 }}>🛡️</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "bold",
-                        color: "#10B981",
-                      }}
-                    >
-                      MFA IDENTIFICATION ENFORCED
-                    </Text>
-                    <Text
-                      style={{ fontSize: 9.5, color: colors.textSecondary }}
-                    >
-                      Officer shield is protected by rotating Supabase MFA
-                      tokens. Future identity joins will require authenticator
-                      synchronizations.
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: "#EF4444",
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                      borderRadius: 4,
-                    }}
-                    onPress={handleDisable2FAConfirm}
-                  >
-                    <Text
-                      style={{
-                        color: "#FFFFFF",
-                        fontSize: 9,
-                        fontWeight: "bold",
-                      }}
-                    >
-                      DISABLE
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : !isSettingUp2FA ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    backgroundColor: isDarkTheme ? "#2d1b1b" : "#FEF2F2",
-                    padding: 12,
-                    borderRadius: 8,
-                    marginBottom: 14,
-                  }}
-                >
-                  <Text style={{ fontSize: 28, marginRight: 12 }}>🔓</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "bold",
-                        color: "#EF4444",
-                      }}
-                    >
-                      MFA PROTECTION SUSPENDED
-                    </Text>
-                    <Text
-                      style={{ fontSize: 9.5, color: colors.textSecondary }}
-                    >
-                      Identity linkage is relying on passwords only. Enable
-                      Supabase MFA security keys to lock coordinate logs from
-                      administrative modifications.
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: colors.accentAmber,
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                      borderRadius: 4,
-                    }}
-                    onPress={start2FASetup}
-                  >
-                    <Text
-                      style={{
-                        color: isDarkTheme ? "#0B121F" : "#FFFFFF",
-                        fontSize: 9,
-                        fontWeight: "900",
-                      }}
-                    >
-                      ACTIVATE
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
-              {/* TWO FACTOR SETUP INLINE WORKFLOW */}
-              {isSettingUp2FA && (
-                <View
-                  style={{
-                    borderTopWidth: 0.5,
-                    borderTopColor: colors.borderBlue,
-                    paddingTop: 14,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "900",
-                      color: colors.accentAmber,
-                      marginBottom: 4,
-                    }}
-                  >
-                    STEP 1: CONFIGURE SYSTEM KEY
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10.5,
-                      color: colors.textSecondary,
-                      marginBottom: 10,
-                    }}
-                  >
-                    Open your Authenticator app (Google Authenticator, Microsoft
-                    Authenticator, etc.) on your smartphone, tap "+", select
-                    "Enter setup key".
-                  </Text>
-
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "900",
-                      color: colors.accentAmber,
-                      marginBottom: 4,
-                    }}
-                  >
-                    STEP 2: DETAILS INTEGRATIONS
-                  </Text>
-                  <View
-                    style={{
-                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
-                      padding: 12,
-                      borderRadius: 8,
-                      borderWidth: 1,
-                      borderColor: colors.borderBlue,
-                      marginBottom: 10,
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 9,
-                        color: colors.textSecondary,
-                        alignSelf: "flex-start",
-                      }}
-                    >
-                      Account Reference:
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "bold",
-                        color: colors.blackText,
-                        marginBottom: 8,
-                        alignSelf: "flex-start",
-                      }}
-                    >
-                      PNP Patroller ({personnel?.badgeNumber || "0000"})
-                    </Text>
-
-                    {/* scan-ready QR code */}
-                    <View
-                      style={{
-                        backgroundColor: "#FFFFFF",
-                        padding: 8,
-                        borderRadius: 8,
-                        marginBottom: 10,
-                        borderWidth: 1,
-                        borderColor: "#E2E8F0",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Image
-                        source={{
-                          uri: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(getOTPAuthUri(personnel?.badgeNumber || "0000", mfaSecret))}`,
-                        }}
-                        style={{ width: 140, height: 140 }}
-                        resizeMode="contain"
-                      />
-                    </View>
-
-                    <Text
-                      style={{
-                        fontSize: 9,
-                        color: colors.textSecondary,
-                        alignSelf: "flex-start",
-                      }}
-                    >
-                      Secret Private key:
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontFamily: "monospace",
-                        fontWeight: "bold",
-                        color: colors.accentAmber,
-                        letterSpacing: 1,
-                        alignSelf: "flex-start",
-                      }}
-                    >
-                      {mfaSecret}
-                    </Text>
-
-                    <TouchableOpacity
-                      style={{
-                        backgroundColor: colors.borderBlue,
-                        alignSelf: "flex-start",
-                        paddingVertical: 4,
-                        paddingHorizontal: 8,
-                        borderRadius: 4,
-                        marginTop: 8,
-                      }}
-                      onPress={handleCopySecret}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 8.5,
-                          fontWeight: "bold",
-                          color: colors.blackText,
-                        }}
-                      >
-                        📋 COPY KEY
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "900",
-                      color: colors.accentAmber,
-                      marginBottom: 4,
-                    }}
-                  >
-                    STEP 3: SECURE TOKEN VERIFY
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10.5,
-                      color: colors.textSecondary,
-                      marginBottom: 6,
-                    }}
-                  >
-                    Enter the 6-digit rotation code displayed in your
-                    Authenticator app:
-                  </Text>
-
-                  <TextInput
-                    style={[
-                      styles.input,
-                      {
-                        textAlign: "center",
-                        fontSize: 18,
-                        letterSpacing: 4,
-                        paddingVertical: 8,
-                        marginBottom: 10,
-                      },
-                    ]}
-                    value={mfaToken}
-                    onChangeText={(v) => setMfaToken(v.replace(/[^0-9]/g, ""))}
-                    placeholder="000000"
-                    placeholderTextColor={colors.textSecondary}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                  />
-
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    <TouchableOpacity
-                      style={{
-                        flex: 1,
-                        backgroundColor: "#10B981",
-                        paddingVertical: 10,
-                        borderRadius: 6,
-                        alignItems: "center",
-                      }}
-                      onPress={handleEnable2FAConfirm}
-                      disabled={mfaLoading}
-                    >
-                      {mfaLoading ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Text
-                          style={{
-                            color: "#FFFFFF",
-                            fontSize: 11,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          VERIFY PROTOCOLS
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={{
-                        flex: 1,
-                        backgroundColor: colors.borderBlue,
-                        paddingVertical: 10,
-                        borderRadius: 6,
-                        alignItems: "center",
-                      }}
-                      onPress={() => setIsSettingUp2FA(false)}
-                    >
-                      <Text
-                        style={{
-                          color: colors.blackText,
-                          fontSize: 11,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        CANCEL
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-            </View>
-
-            {/* SYSTEM AUTO SYNC OPTIONS AND TRASH TRIGGERS */}
-            <View style={styles.card}>
-              <Text style={styles.cardHeading}>
-                COMMUNICATION PORT SETTINGS
-              </Text>
-
-              <View
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  paddingVertical: 12,
-                  borderBottomWidth: 0.5,
-                  borderBottomColor: colors.borderBlue,
-                }}
-              >
-                <View style={{ flex: 1, marginRight: 16 }}>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "bold",
-                      color: colors.blackText,
-                    }}
-                  >
-                    AUTOMATIC HQ UPLINK CACHING
-                  </Text>
-                  <Text style={{ fontSize: 10, color: colors.textSecondary }}>
-                    When connection is active, auto-upload coordinate streams to
-                    Supabase servers every 60 seconds.
-                  </Text>
-                </View>
-                <Switch
-                  value={autoSync}
-                  onValueChange={onToggleAutoSync}
-                  trackColor={{ false: "#767577", true: "#10B981" }}
-                  thumbColor={autoSync ? "#FFFFFF" : "#f4f3f4"}
-                />
-              </View>
-
-              <View
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  paddingVertical: 12,
-                }}
-              >
-                <View style={{ flex: 1, marginRight: 16 }}>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "bold",
-                      color: colors.blackText,
-                    }}
-                  >
-                    FLUSH SYNCED ARCHIVES
-                  </Text>
-                  <Text style={{ fontSize: 10, color: colors.textSecondary }}>
-                    Remove all synced coordinates logs permanently from local
-                    Sqlite storage.
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 10,
-                    paddingHorizontal: 14,
-                    borderRadius: 6,
-                  }}
-                  onPress={onClearCache}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontSize: 10,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    PURGE SYNCED
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        )}
       </ScrollView>
 
       {/* BOTTOM NAVIGATION BAR */}
@@ -1231,14 +1047,18 @@ export const DashboardView = ({
           }}
           onPress={() => {
             if (personnel) {
-              // Navigate to AccountScreen with personnel ID
-              // Note: This would need navigation prop passed down
-              // For now, we'll just log or show alert
-
-              console.log(
-                "Navigate to AccountScreen for personnel:",
-                personnel?.id,
-              );
+              navigation.navigate("Account", {
+                personnelId: personnel.id,
+                isDarkTheme: isDarkTheme,
+                onClose: () => {
+                  // Navigate back to home tab when closing account screen
+                  setActiveNav("home");
+                },
+              });
+            } else {
+              // Handle case where personnel data is not available
+              console.warn("Personnel data not available for account navigation");
+              Alert.alert("Error", "Unable to load account information. Please try again later.");
             }
           }}
         >

@@ -1,11 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL =
-  process.env.EXPO_PUBLIC_SUPABASE_URL ||
-  "https://wxqbngmfovgqpyboriru.supabase.co";
-const SUPABASE_ANON_KEY =
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4cWJuZ21mb3ZncXB5Ym9yaXJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNTEyMDcsImV4cCI6MjA5NTYyNzIwN30.eI7XWhwmyEbuMvYwX-sEF0lGJD-hImZ67lboX-zVthE";
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "";
+const SUPABASE_SERVICE_KEY = process.env.EXPO_PUBLIC_SERVICE_ROLE_KEY || "";
 
 export const isSupabaseConfigured = (): boolean => {
   return !!(
@@ -17,6 +14,14 @@ export const isSupabaseConfigured = (): boolean => {
 };
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+  },
+});
+
+export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
