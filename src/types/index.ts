@@ -4,6 +4,7 @@ export interface Personnel {
   rank: {
     id: string;
     rank_name: string;
+    description: string;
   } | null;
   rankId: string;
   fullname: string;
@@ -19,6 +20,7 @@ export interface Personnel {
   role: string;
   email?: string;
   photo_url?: string; // URL to the personnel's photo in Supabase storage
+  expo_push_token: string;
 }
 
 export interface Unit {
@@ -29,6 +31,10 @@ export interface Unit {
 export interface PersonnelLog {
   id: string;
   personnelId: string;
+  personnel?: {
+    rank_name: string;
+    fullname: string;
+  };
   latitude: number;
   longitude: number;
   speed: number;

@@ -39,13 +39,13 @@ export const RegisterView = ({
   const colors = getThemeColors(isDarkTheme);
 
   // Form Fields State
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [badgeNumber, setBadgeNumber] = useState("");
-  const [rankId, setRankId] = useState("");
-  const [fullname, setFullname] = useState("");
-  const [unitId, setUnitId] = useState("");
-  const [designation, setDesignation] = useState("");
+  const [email, setEmail] = useState("cimcshooting@gmail.com");
+  const [password, setPassword] = useState("123456");
+  const [badgeNumber, setBadgeNumber] = useState("352776");
+  const [rankId, setRankId] = useState("d4f365ef-0549-446d-9cc6-05db56dfb2fe");
+  const [fullname, setFullname] = useState("Jamie Gamiao Agngaray Jr");
+  const [unitId, setUnitId] = useState("a92cb5f4-eb15-4a46-a69c-766cc7dbe45d");
+  const [designation, setDesignation] = useState("Asst Investigation PNCO");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [viberNumber, setViberNumber] = useState("");
 

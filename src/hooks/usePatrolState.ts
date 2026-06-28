@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
-import { Alert, Linking } from "react-native";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Alert, Linking, Platform, AppState, Vibration } from "react-native";
 import * as Location from "expo-location";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system";
-
+import { Audio } from "expo-av";
+import * as Notifications from "expo-notifications";
 import { Personnel, Schedule, PersonnelLog } from "../types";
 import {
   getPersonnelByBadge,
   getPersonnelByEmail,
-  registerPersonnel,
+  getPersonnelById,
   findCandidatePersonnel,
   getRanks,
   getUnits,
@@ -27,7 +28,11 @@ import {
   stopBackgroundUpdates,
   formatManilaTimestamp,
 } from "../services/BackgroundTracker";
-import { supabase, isSupabaseConfigured } from "../services/supabase";
+import {
+  supabase,
+  isSupabaseConfigured,
+  supabaseAdmin,
+} from "../services/supabase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   enrollMFA,
@@ -35,6 +40,12 @@ import {
   checkMFAStatus,
   unenrollMFA,
 } from "../services/supabaseMFA";
+
+import Constants from "expo-constants";
+
+// Async storage keys for pending MFA verification
+const PENDING_MFA_USER_ID_KEY = "@pnp_pending_mfa_user_id";
+const PENDING_MFA_PERSONNEL_KEY = "@pnp_pending_mfa_personnel";
 
 export const usePatrolState = () => {
   const [personnel, setPersonnel] = useState<Personnel | null>(null);
@@ -55,8 +66,21 @@ export const usePatrolState = () => {
 
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-
   const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(false);
+  const [isWithinScheduledTime, setIsWithinScheduledTime] = useState(false);
+  const [activeDutyType, setActiveDutyType] = useState<string | null>(null);
+
+  const appStateRef = useRef(AppState.currentState);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      appStateRef.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   // Checks device's system GPS and permission status
   const checkLocationPermissionState = useCallback(async () => {
@@ -121,15 +145,19 @@ export const usePatrolState = () => {
   };
 
   const loadLogsAndStats = useCallback(async () => {
+    // Use ref to get current personnel to avoid stale closure issues
+    if (!personnel) return;
+
     try {
-      const latest = await getLatestLogs(12);
+      const latest = await getLatestLogs(personnel.id, 12);
       setLogs(latest);
     } catch (e) {
       console.warn("Could not query latest log cards", e);
     }
-  }, []);
+  }, []); // Empty deps because we use ref instead of direct personnel variable
 
   const updateUnsyncedCounter = useCallback(async () => {
+    // Use ref to get current personnel to avoid stale closure issues
     try {
       const count = await getUnsyncedCount();
       setUnsyncedCount(count);
@@ -137,6 +165,22 @@ export const usePatrolState = () => {
       console.warn(e);
     }
   }, []);
+
+  useEffect(() => {
+    if (personnel) {
+      // This runs after personnel state has been updated
+      console.log("Personnel is now set:", personnel);
+      // Handle post-login logic here
+      (async () => {
+        const assignedSched = await getScheduleByPersonnel(personnel.id);
+        if (assignedSched) {
+          setSchedule(assignedSched);
+        }
+        await loadLogsAndStats();
+        await updateUnsyncedCounter();
+      })();
+    }
+  }, [personnel]);
 
   // Poll system GPS state
   useEffect(() => {
@@ -161,58 +205,118 @@ export const usePatrolState = () => {
       }
     };
     loadSettings();
-  }, []);
+  }, []); // Run once on mount instead of depending on autoSync to prevent infinite loop
 
-  // Real-time subscription for SOS alerts from other personnel
+  // Helper function to check if current time is within any schedule for today
+  const checkIfWithinScheduledTime = useCallback(() => {
+    if (!schedule || schedule.length === 0) {
+      setIsWithinScheduledTime(false);
+      setActiveDutyType(null);
+      return false;
+    }
+
+    const now = new Date();
+    const today = now.toISOString().split("T")[0]; // YYYY-MM-DD
+
+    let isWithin = false;
+    let activeDuty: string | null = null;
+
+    for (const sched of schedule) {
+      if (sched.date !== today) continue;
+
+      const [fromHour, fromMin] = sched.timeFrom.split(":").map(Number);
+      const [toHour, toMin] = sched.timeTo.split(":").map(Number);
+
+      const startTime = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        fromHour,
+        fromMin,
+        0,
+        0,
+      );
+      const endTime = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        toHour,
+        toMin,
+        0,
+        0,
+      );
+
+      if (now >= startTime && now < endTime) {
+        isWithin = true;
+        activeDuty = sched.duty_type;
+        break; // Use the first matching schedule
+      }
+    }
+
+    setIsWithinScheduledTime(isWithin);
+    setActiveDutyType(activeDuty);
+    return isWithin;
+  }, [schedule]);
+
+  // Update push token for the current user when we have personnel and notification permission
   useEffect(() => {
-    if (!personnel || !isSupabaseConfigured()) return;
-
-    // Subscribe to new personnel_logs entries
-    const sosSubscription = supabase
-      .channel("personnel_logs_changes")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "personnel_logs" },
-        (payload) => {
-          const newLog = payload.new as PersonnelLog;
-
-          // Check if this is an SOS alert (speed: 999.0 is our SOS indicator)
-          // and it's not from the current user
-          if (
-            newLog.speed === 999.0 &&
-            newLog.dutyType === "EMERGENCY_SOS" &&
-            newLog.personnelId !== personnel.id
-          ) {
-            // Show alert for SOS from another officer
-            Alert.alert(
-              "🚨 EMERGENCY SOS ALERT",
-              `Officer ${newLog.personnelId} has triggered an SOS!\nTap to acknowledge.`,
-              [
-                {
-                  text: "ACKNOWLEDGE",
-                  onPress: () => {
-                    // Optionally, you could mark this as acknowledged here
-                    // For now, just dismiss the alert
-                  },
-                },
-                { text: "CLOSE", style: "cancel" },
-              ],
-            );
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      sosSubscription.unsubscribe();
-    };
-  }, [personnel, isSupabaseConfigured]);
+    if (!personnel) return;
+  }, [personnel]);
 
   // Check for auto-login request from notification tap AND active patrol session
   useEffect(() => {
     const checkAutoLoginAndResume = async () => {
       try {
-        // First check if auto-login was requested from notification tap
+        // FIRST: Check if we have pending MFA data (user is in middle of MFA setup)
+        const pendingUserId = await AsyncStorage.getItem(
+          PENDING_MFA_USER_ID_KEY,
+        );
+        const pendingPersonnelJson = await AsyncStorage.getItem(
+          PENDING_MFA_PERSONNEL_KEY,
+        );
+
+        if (pendingUserId && pendingPersonnelJson) {
+          try {
+            const pendingPersonnel = JSON.parse(pendingPersonnelJson);
+            // Validate that the pending personnel data is valid
+            if (pendingPersonnel && pendingPersonnel.id === pendingUserId) {
+              // Set personnel state from pending MFA data
+              setPersonnel(pendingPersonnel);
+
+              // Load associated data
+              const assignedSched = await getScheduleByPersonnel(
+                pendingPersonnel.id,
+              );
+              if (assignedSched) {
+                setSchedule(assignedSched);
+              }
+
+              loadLogsAndStats();
+              updateUnsyncedCounter();
+
+              console.log(
+                "[Auto-resume] Restored personnel state from pending MFA data for user:",
+                pendingUserId,
+              );
+
+              // Clear the pending MFA data since we've restored it
+              await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+              await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+
+              return; // Important: return early to avoid overwriting with other login attempts
+            }
+          } catch (parseError) {
+            console.warn(
+              "Failed to parse pending MFA personnel data:",
+              parseError,
+            );
+            // Clear invalid pending data
+            await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+            await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+          }
+        }
+
+        // SECOND: Check if auto-login was requested from notification tap
         const autoLoginRequested = await AsyncStorage.getItem(
           "@pnp_auto_login_requested",
         );
@@ -249,6 +353,8 @@ export const usePatrolState = () => {
                   isApproved: remoteProfile.is_approved,
                   role: remoteProfile.role,
                   email: user.email,
+                  photo_url: remoteProfile.photo_url, // Add photo URL from database
+                  expo_push_token: remoteProfile.expo_push_token,
                 };
 
                 // Set personnel state
@@ -272,7 +378,7 @@ export const usePatrolState = () => {
             }
           }
         } else {
-          // Check for active patrol session (app reopened during patrol)
+          // THIRD: Check for active patrol session (app reopened during patrol)
           const activePersonnelId = await AsyncStorage.getItem(
             "@pnp_active_personnel_id",
           );
@@ -310,6 +416,8 @@ export const usePatrolState = () => {
                   isApproved: remoteProfile.is_approved,
                   role: remoteProfile.role,
                   email: user.email,
+                  photo_url: remoteProfile.photo_url, // Add photo URL from database
+                  expo_push_token: remoteProfile.expo_push_token,
                 };
 
                 // Set personnel state
@@ -339,7 +447,7 @@ export const usePatrolState = () => {
     };
 
     checkAutoLoginAndResume();
-  }, []);
+  }, [personnel]);
 
   const toggleAutoSync = async () => {
     try {
@@ -354,15 +462,18 @@ export const usePatrolState = () => {
   // Supabase 2FA Settings & check effects
   useEffect(() => {
     const check2FA = async () => {
+      // Use ref to get current personnel to avoid stale closure issues
       if (personnel) {
         try {
-          const email = personnel.email || personnel.badgeNumber;
-          const status = await checkMFAStatus(email);
+          // Use personnel.id as the key for AsyncStorage to ensure consistency
+          const personnelIdKey = personnel.id;
+          const status = await checkMFAStatus(
+            personnel.email || personnel.badgeNumber,
+          );
           setIs2FAEnabled(status.isEnabled);
           if (status.isEnabled && status.factorId) {
-            const emailKey = email.trim().toLowerCase();
             await AsyncStorage.setItem(
-              `@pnp_supabase_mfa_factor_id_${emailKey}`,
+              `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
               status.factorId,
             );
           }
@@ -381,17 +492,20 @@ export const usePatrolState = () => {
     code: string,
     factorId?: string,
   ): Promise<boolean> => {
+    // Use ref to get current personnel to avoid stale closure issues
+    console.log("personnel: ", personnel);
     if (!personnel) return false;
     try {
-      const email = personnel.email || personnel.badgeNumber;
-      const emailKey = email.trim().toLowerCase();
+      // Use personnel.id as the key for AsyncStorage to ensure consistency
+      const personnelIdKey = personnel.id;
 
       // Determine the active factorId (e.g., from AsyncStorage fallback or passed directly)
       let activeFactorId = factorId;
+      console.log("activeFactorId: ", activeFactorId);
       if (!activeFactorId) {
         activeFactorId =
           (await AsyncStorage.getItem(
-            `@pnp_supabase_mfa_factor_id_${emailKey}`,
+            `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
           )) || "";
         if (!activeFactorId) {
           throw new Error("No MFA factor ID found. Please enroll MFA first.");
@@ -399,7 +513,7 @@ export const usePatrolState = () => {
       }
 
       const verified = await verifyMFAEnrollment(
-        email,
+        personnel.email || personnel.badgeNumber,
         activeFactorId,
         code,
         secret,
@@ -414,7 +528,7 @@ export const usePatrolState = () => {
       }
 
       await AsyncStorage.setItem(
-        `@pnp_supabase_mfa_factor_id_${emailKey}`,
+        `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
         activeFactorId,
       );
       setIs2FAEnabled(true);
@@ -434,23 +548,24 @@ export const usePatrolState = () => {
   };
 
   const disable2FA = async () => {
+    // Use ref to get current personnel to avoid stale closure issues
     if (!personnel) return;
     try {
-      const email = personnel.email || personnel.badgeNumber;
-      const emailKey = email.trim().toLowerCase();
+      // Use personnel.id as the key for AsyncStorage to ensure consistency
+      const personnelIdKey = personnel.id;
       const factorId =
         (await AsyncStorage.getItem(
-          `@pnp_supabase_mfa_factor_id_${emailKey}`,
+          `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
         )) ?? "";
 
       await unenrollMFA(factorId);
       await AsyncStorage.removeItem(
-        `@pnp_supabase_mfa_factor_id_${emailKey}`,
+        `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
       ).catch(() => {});
 
       // Clean up legacy keys
       await AsyncStorage.removeItem(
-        `@pnp_google_authenticator_mfa_secret_${emailKey}`,
+        `@pnp_google_authenticator_mfa_secret_${personnelIdKey}`,
       ).catch(() => {});
       await AsyncStorage.removeItem(
         `@pnp_google_authenticator_mfa_secret_${personnel.badgeNumber}`,
@@ -503,7 +618,13 @@ export const usePatrolState = () => {
       if (countsTimer) clearInterval(countsTimer);
       if (autoSyncTimer) clearInterval(autoSyncTimer);
     };
-  }, [isShiftActive, autoSync, loadLogsAndStats, updateUnsyncedCounter]);
+  }, [
+    personnel,
+    isShiftActive,
+    autoSync,
+    loadLogsAndStats,
+    updateUnsyncedCounter,
+  ]);
 
   const openSystemSettings = async () => {
     setGpsLoading(true);
@@ -523,7 +644,7 @@ export const usePatrolState = () => {
     passwordInput: string,
     otpCode?: string,
   ): Promise<
-    boolean | "NEED_2FA" | "PENDING_APPROVAL" | "NOT_FOUND" | string
+    boolean | "NEED_2FA" | "PENDING_APPROVAL" | "NOT_FOUND" | (string & {})
   > => {
     const trimmedEmail = emailInput.trim();
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
@@ -547,8 +668,6 @@ export const usePatrolState = () => {
         password: passwordInput,
       });
 
-      // console.log("data: ", data);
-
       if (error) {
         return error.message || "Invalid email or password.";
       }
@@ -559,11 +678,27 @@ export const usePatrolState = () => {
         // Query public.personnel table
         const { data: remoteProfile, error: profileErr } = await supabase
           .from("personnel")
-          .select("*, rank(*)")
+          .select("*, rank(*), unit(*)")
           .eq("id", authUser.id)
-          .single();
+          .maybeSingle();
 
         if (profileErr) throw profileErr;
+
+        const projectId =
+          Constants.expoConfig?.extra?.eas?.projectId ??
+          Constants.easConfig?.projectId;
+
+        if (!projectId) {
+          throw new Error("EAS Project ID not found in app.json config.");
+        }
+
+        const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
+          .data;
+
+        await supabase
+          .from("personnel")
+          .update({ expo_push_token: token })
+          .eq("id", authUser.id);
 
         const scheduleData = await getScheduleByPersonnel(authUser.id);
 
@@ -582,32 +717,43 @@ export const usePatrolState = () => {
             role: remoteProfile.role,
             email: authUser.email,
             photo_url: remoteProfile.photo_url, // Add photo URL from database
+            expo_push_token: remoteProfile.expo_push_token,
           };
         } else {
           // If personnel record doesn't exist, return NOT_FOUND (no dynamic profile creation)
           return "NOT_FOUND";
         }
 
-        // if (pUser) {
-        //   await savePersonnel(pUser);
-        // }
+        setPersonnel(pUser);
 
         // CHECK SUPABASE MULTI-FACTOR AUTHENTICATION (MFA) - FORCED COMPULSORY
         // Bypass MFA in development if DISABLE_MFA is set to 'true'
-        const disableMFA = true; //process.env.DISABLE_MFA === "true";
-        if (!disableMFA) {
-          // Now that we are authenticated, check MFA status and enroll if necessary
+        if (process.env.EXPO_PUBLIC_DISABLE_MFA === "true") {
+          // MFA bypassed for development
+        } else {
           try {
             const userEmail = pUser?.email || trimmedEmail.toLowerCase();
             let status = await checkMFAStatus(userEmail);
+            console.log("Status: ", status);
             if (!status.isEnabled) {
               // Force-seed status enrollment to guarantee high-grade secure PNP compliance on first login
               const enrollment = await enrollMFA(userEmail);
-              status = {
-                isEnabled: true,
-                factorId: enrollment.id,
-                secret: enrollment.secret,
-              };
+              // Store the factorId for later verification during login using personnel.id as key
+              const personnelIdKey = pUser.id;
+              await AsyncStorage.setItem(
+                `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
+                enrollment.id,
+              );
+
+              // Store pending MFA data so we can restore personnel state after MFA verification
+              await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
+              await AsyncStorage.setItem(
+                PENDING_MFA_PERSONNEL_KEY,
+                JSON.stringify(pUser),
+              );
+
+              // Return the secret so the client can show QR code for setup
+              return `NEED_MFA_SETUP:${enrollment.secret}`;
             }
 
             if (status.isEnabled) {
@@ -631,35 +777,34 @@ export const usePatrolState = () => {
             // If MFA check fails, we should not allow login since MFA is compulsory
             return "Multi-factor authentication setup failed. Please try again.";
           }
-        } else {
-          console.warn(
-            "MFA verification bypassed via DISABLE_MFA environment variable",
-          );
         }
+
+        if (!pUser) {
+          return "NOT_FOUND";
+        }
+
+        if (!pUser.isApproved) {
+          return "PENDING_APPROVAL";
+        }
+
+        if (pUser) {
+          pUser.email = trimmedEmail.toLowerCase();
+        }
+
+        // ⚠️ FIX: Changed from personnel (old null state) to pUser (new user state)
+        setPersonnel(pUser);
+
+        // Vehicle functionality removed - using personnel only
+        const assignedSched = await getScheduleByPersonnel(pUser.id);
+        if (assignedSched) {
+          setSchedule(assignedSched);
+        }
+
+        return true;
       }
 
-      if (!pUser) {
-        return "NOT_FOUND";
-      }
-
-      if (!pUser.isApproved) {
-        return "PENDING_APPROVAL";
-      }
-
-      if (pUser) {
-        pUser.email = trimmedEmail.toLowerCase();
-      }
-
-      // Successful verification
-      setPersonnel(pUser);
-
-      // Vehicle functionality removed - using personnel only
-      const assignedSched = await getScheduleByPersonnel(pUser.id);
-      if (assignedSched) {
-        setSchedule(assignedSched);
-      }
-
-      return true;
+      // ⚠️ FIX: Fallback handle if data/user object returned by Supabase is empty
+      return "Authentication session creation failed. Empty user profile payload.";
     } catch (e: any) {
       console.error(e);
       return e.message || "Identity link handshake failed.";
@@ -705,6 +850,22 @@ export const usePatrolState = () => {
         "Your active patrol shift has been successfully paused and logged.",
       );
     } else {
+      // Check if within scheduled time before allowing shift to start
+      const isWithinTime = checkIfWithinScheduledTime();
+      if (!isWithinTime) {
+        Alert.alert(
+          "Outside Scheduled Time",
+          "You can only start patrolling during your scheduled duty hours.\nPlease check your schedule for today.",
+          [{ text: "OK", style: "cancel" }],
+        );
+        return;
+      }
+
+      // Store duty type for background tracking
+      if (activeDutyType) {
+        await AsyncStorage.setItem("@pnp_duty_type", activeDutyType);
+      }
+
       // Vehicle functionality removed - using personnel only
 
       try {
@@ -831,8 +992,8 @@ export const usePatrolState = () => {
 
     return new Promise((resolve) => {
       Alert.alert(
-        "EMERGENCY SOS?",
-        "This will immediately send an emergency alert with your live GPS location back to INPPO HQ. Are you sure you want to trigger it?",
+        "DISTRESS SIGNAL",
+        "This will immediately send an emergency alert with your live GPS location back to INPPO HQ and notify your unit/station members. Are you sure you want to trigger it?",
         [
           {
             text: "Cancel",
@@ -840,25 +1001,33 @@ export const usePatrolState = () => {
             onPress: () => resolve(false),
           },
           {
-            text: "YES, SEND SOS ALERT",
+            text: "YES, SEND DISTRESS ALERT",
             style: "destructive",
             onPress: async () => {
               try {
                 let lat = 14.591;
                 let lng = 120.973;
                 let speed = 0.0;
+                let accuracy = 0;
 
                 try {
                   const { status } =
                     await Location.getForegroundPermissionsAsync();
-                  if (status === "granted") {
-                    const loc = await Location.getCurrentPositionAsync({
-                      accuracy: Location.Accuracy.Balanced,
-                    });
-                    lat = loc.coords.latitude;
-                    lng = loc.coords.longitude;
-                    speed = loc.coords.speed || 0.0;
+                  if (status !== "granted") {
+                    const { status } =
+                      await Location.requestForegroundPermissionsAsync();
+                    if (status !== Location.PermissionStatus.GRANTED) {
+                      return;
+                    }
                   }
+
+                  const loc = await Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.BestForNavigation,
+                  });
+                  lat = loc.coords.latitude;
+                  lng = loc.coords.longitude;
+                  speed = loc.coords.speed || 0.0;
+                  accuracy = loc.coords.accuracy || 0;
                 } catch (e) {
                   console.warn(
                     "GPS request failed, using fallback coordinates",
@@ -868,12 +1037,13 @@ export const usePatrolState = () => {
                     lat = logs[0].latitude;
                     lng = logs[0].longitude;
                     speed = logs[0].speed;
+                    accuracy = logs[0].networkSignal || 0;
                   }
                 }
 
-                // const signal = 4;
                 const captured = formatManilaTimestamp(isShiftActive);
-                if (isShiftActive) {
+                let shiftWasActive = isShiftActive;
+                if (shiftWasActive) {
                   setIsShiftActive(false);
                   await AsyncStorage.removeItem("@pnp_shift_status");
                 }
@@ -883,9 +1053,13 @@ export const usePatrolState = () => {
                 const sosLog: PersonnelLog = {
                   id: uniqueId,
                   personnelId: personnel.id,
+                  personnel: {
+                    rank_name: personnel.rank?.rank_name || "",
+                    fullname: personnel.fullname,
+                  },
                   latitude: lat,
                   longitude: lng,
-                  speed: 999.0, // Special speed indicator for SOS alert
+                  speed: speed, // Special speed indicator for SOS alert
                   networkSignal: 4, // Signal strength for SOS
                   dutyType: "EMERGENCY_SOS", // Special duty type for SOS
                   capturedAt: captured,
@@ -893,45 +1067,21 @@ export const usePatrolState = () => {
                 };
 
                 await insertPersonnelLog(sosLog);
-
-                // let remoteSuccess = false;
-                // if (isSupabaseConfigured()) {
-                //   try {
-                //     const { error } = await supabase
-                //       .from("personnel_logs")
-                //       .insert([
-                //         {
-                //           id: uniqueId,
-                //           personnel_id: personnel.id,
-                //           schedule_id: schedule?.id || null,
-                //           latitude: lat,
-                //           longitude: lng,
-                //           speed: 999.0,
-                //           network_signal: 4,
-                //           accuracy: null,
-                //           duty_type: "EMERGENCY_SOS",
-                //           captured_at: captured,
-                //         },
-                //       ]);
-                //     if (!error) {
-                //       remoteSuccess = true;
-                //       // Note: markLogsAsSynced is a no-op since we don't have a synced column in Supabase
-                //       // Local sync tracking would be handled elsewhere if needed
-                //     }
-                //   } catch (supabaseErr) {
-                //     console.warn(
-                //       "Supabase SOS broadcast failed, cached locally",
-                //       supabaseErr,
-                //     );
-                //   }
-                // }
-
                 await updateUnsyncedCounter();
                 await loadLogsAndStats();
 
+                // NEW: Send SOS alert to unit members
+                await sendUnitSosAlert(personnel, {
+                  latitude: lat,
+                  longitude: lng,
+                  accuracy: accuracy,
+                  timestamp: new Date().toISOString(),
+                  sosId: uniqueId,
+                });
+
                 Alert.alert(
-                  "SOS RECORDED",
-                  `EMERGENCY COORDINATES SENT!\n\nPlease stay at your position or proceed to the safe area.`,
+                  "DISTRESS SIGNAL SENT",
+                  `Your unit/station members have been notified with your location.\nPlease stay at your position or proceed to the safe area.`,
                 );
 
                 resolve(true);
@@ -951,6 +1101,137 @@ export const usePatrolState = () => {
     });
   };
 
+  /**
+   * Send SOS alert to all active members of the same unit
+   */
+  const sendUnitSosAlert = useCallback(
+    async (
+      sosOriginator: Personnel,
+      locationData: {
+        latitude: number;
+        longitude: number;
+        accuracy: number;
+        timestamp: string;
+        sosId: string;
+      },
+    ) => {
+      try {
+        // Don't proceed if no unit ID
+        if (!sosOriginator.unitId) {
+          console.warn("No unit ID found for SOS originator");
+          return;
+        }
+
+        // Get all active personnel in the same unit (excluding the sender)
+        // These are personnel who have registered, been approved, and belong to the same unit
+        const { data: unitMembers, error: memberError } = await supabase
+          .from("personnel")
+          .select("id, fullname, badge_number, unit_id, expo_push_token")
+          .eq("unit_id", sosOriginator.unitId)
+          .neq("id", sosOriginator.id)
+          .eq("is_approved", true)
+          .not("expo_push_token", "is", null);
+
+        if (memberError) {
+          console.error("Failed to fetch unit members:", memberError);
+          return;
+        }
+
+        if (!unitMembers || unitMembers.length === 0) {
+          console.log("No other active unit members found");
+          return;
+        }
+
+        // Prepare SOS notification
+        const notificationTitle = "DISTRESS SIGNAL";
+        const notificationBody = `${sosOriginator.rank?.rank_name} ${sosOriginator.fullname} needs assistance! Tap for details.`;
+
+        // Send notification to each member
+        const notificationPromises = unitMembers.map(async (member) => {
+          try {
+            // Only send notification if we have a valid expo push token
+            if (member.expo_push_token) {
+              await sendExpoPushNotification({
+                to: member.expo_push_token,
+                sound: "sos_alert.wav", // Custom sound - will fallback to default if not found
+                title: notificationTitle,
+                body: notificationBody,
+                channelId: "emergency-alerts-v2",
+                category: "sos-actions",
+                data: {
+                  type: "patrol-notification-tap",
+                  shouldAutoLogin: true,
+                  sosOriginatorId: sosOriginator.id,
+                  sosOriginatorRank: sosOriginator.rank?.rank_name,
+                  sosOriginatorName: sosOriginator.fullname,
+                  sosOriginatorBadge: sosOriginator.badgeNumber,
+                  latitude: locationData.latitude,
+                  longitude: locationData.longitude,
+                  accuracy: locationData.accuracy,
+                  timestamp: locationData.timestamp,
+                  sosId: locationData.sosId,
+                  unitId: sosOriginator.unitId,
+                },
+                // Android specific settings
+                ...(Platform.OS === "android"
+                  ? {
+                      priority: "high", // Ensures notification appears as heads-up
+                      vibrationPattern: [0, 600, 400, 600], // Match our SOS vibration pattern
+                    }
+                  : {}),
+                // iOS specific settings
+                ...(Platform.OS === "ios"
+                  ? {
+                      sound: "sos_alert.wav",
+                    }
+                  : {}),
+              });
+            } else {
+              console.warn(
+                `Skipping SOS notification for member ${member.id}: no expo push token available`,
+              );
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to send SOS notification to member ${member.id}:`,
+              error,
+            );
+          }
+        });
+
+        // Wait for all notifications to be sent (don't await individually to prevent blocking)
+        await Promise.allSettled(notificationPromises);
+        const sentCount = unitMembers.length;
+        console.log(
+          `Sent SOS alert to ${sentCount} of ${unitMembers.length} unit members`,
+        );
+      } catch (error) {
+        console.error("Error sending unit SOS alert:", error);
+      }
+    },
+    [personnel, supabase],
+  );
+
+  /**
+   * Send push notification via Expo's push notification service
+   */
+  const sendExpoPushNotification = useCallback(async (notification: any) => {
+    try {
+      await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip, deflate",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(notification),
+      });
+    } catch (error) {
+      console.error("Failed to send push notification:", error);
+      throw error;
+    }
+  }, []);
+
   const registerUser = async (registrationData: {
     email: string;
     badge_number: string;
@@ -961,9 +1242,21 @@ export const usePatrolState = () => {
     phone_number: string;
     viber_number: string;
     password?: string;
-    photoUri?: string; // Optional photo URI for upload
+    photoUri: string; // Required photo URI for upload
+    expo_push_token?: string; // Expo push token for notifications
   }): Promise<{ success: boolean; message: string }> => {
     try {
+      const projectId =
+        Constants.expoConfig?.extra?.eas?.projectId ??
+        Constants.easConfig?.projectId;
+
+      if (!projectId) {
+        throw new Error("EAS Project ID not found in app.json config.");
+      }
+
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
+        .data;
+
       // 1. Verify existence of the personnel via badge_number, rank_id, unit_id, and designation
       const candidate = await findCandidatePersonnel(
         registrationData.badge_number,
@@ -980,27 +1273,40 @@ export const usePatrolState = () => {
         };
       }
 
-      candidate.email = registrationData.email;
+      // 2. Create Supabase auth user (to trigger confirmation email)
+      const { data: authUser, error: authError } =
+        await supabaseAdmin.auth.admin.createUser({
+          id: candidate.id,
+          email: registrationData.email,
+          password: registrationData.password || "",
+          email_confirm: true,
+        });
 
-      // 2. Update the existing candidate record with the new registration details
-      const success = await registerPersonnel(
-        candidate.id,
-        registrationData.email,
-        registrationData.password || "",
-        // registrationData.fullname,
-        // registrationData.phone_number,
-        // registrationData.viber_number,
-      );
-
-      if (!success) {
-        return {
-          success: false,
-          message:
-            "Your personnel information already registered. Registration denied.",
-        };
+      if (authError) {
+        throw authError;
       }
 
-      // 3. If photo URI is provided, upload the photo to Supabase storage
+      // 3. Update the existing candidate record with the new registration details
+      // const success = await registerPersonnel(
+      //   candidate.id,
+      //   registrationData.email,
+      //   registrationData.password || "",
+      //   // registrationData.fullname,
+      //   // registrationData.phone_number,
+      //   // registrationData.viber_number,
+      //   // undefined, // photoUrl will be handled after photo upload
+      //   // registrationData.expo_push_token,
+      // );
+
+      // if (!success) {
+      //   return {
+      //     success: false,
+      //     message:
+      //       "Your personnel information already registered. Registration denied.",
+      //   };
+      // }
+
+      // 4. If photo URI is provided, upload the photo to Supabase storage
       if (registrationData.photoUri) {
         try {
           // Resize/compress image for efficiency
@@ -1013,7 +1319,7 @@ export const usePatrolState = () => {
             encoding: FileSystem.EncodingType.Base64,
           });
           const arrayBuffer = decode(base64Data);
-          const fileName = `${candidate.id}/${Date.now()}.jpg`;
+          const fileName = `${Date.now()}.jpg`;
 
           // Upload the ArrayBuffer instead of the problematic Blob
           const { data, error } = await supabase.storage
@@ -1031,10 +1337,10 @@ export const usePatrolState = () => {
 
           const photoUrl = urlData.publicUrl;
 
-          // Update personnel record with photo URL
+          // Update personnel record with photo URL and expo_push_token
           const { error: dbError } = await supabase
             .from("personnel")
-            .update({ photo_url: photoUrl })
+            .update({ photo_url: photoUrl, expo_push_token: token })
             .eq("id", candidate.id);
 
           if (dbError) throw dbError;
@@ -1048,7 +1354,7 @@ export const usePatrolState = () => {
       return {
         success: true,
         message:
-          "Registration successful! Your profile has been submitted for administrative verification and approval.",
+          "Registration successful! Please check your email to confirm your account before logging in.",
       };
     } catch (err: any) {
       console.error("Registration error", err);
@@ -1060,6 +1366,31 @@ export const usePatrolState = () => {
       };
     }
   };
+
+  // Function to refresh personnel data from the database
+  const refreshPersonnel = useCallback(async () => {
+    if (!personnel) return;
+    try {
+      const freshPersonnel = await getPersonnelById(personnel.id);
+      if (freshPersonnel) {
+        setPersonnel(freshPersonnel);
+        // Also refresh related data
+        const assignedSched = await getScheduleByPersonnel(personnel.id);
+        if (assignedSched) {
+          setSchedule(assignedSched);
+        }
+        loadLogsAndStats();
+        updateUnsyncedCounter();
+      }
+    } catch (error) {
+      console.error("Failed to refresh personnel data:", error);
+    }
+  }, [
+    personnel?.id,
+    getScheduleByPersonnel,
+    loadLogsAndStats,
+    updateUnsyncedCounter,
+  ]);
 
   return {
     personnel,
@@ -1088,5 +1419,6 @@ export const usePatrolState = () => {
     requestBackgroundPermission,
     enableGpsInline,
     registerUser,
+    refreshPersonnel,
   };
 };

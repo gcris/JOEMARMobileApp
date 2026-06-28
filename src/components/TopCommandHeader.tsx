@@ -40,7 +40,7 @@ export const TopCommandHeader = ({
         />
         <View>
           <Text style={[styles.navTitle, { fontSize: 18, letterSpacing: 0.5 }]}>
-            INPPO Patrol Tracker v1.0
+            Project J.O.E.M.A.R v1.0
           </Text>
         </View>
       </View>

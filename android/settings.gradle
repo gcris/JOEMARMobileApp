@@ -44,7 +44,7 @@ if (getRNMinorVersion() >= 75) {
   }
 }
 
-rootProject.name = 'PNP Patroller Geotracker'
+rootProject.name = 'Project JOEMAR'
 
 dependencyResolutionManagement {
   versionCatalogs {

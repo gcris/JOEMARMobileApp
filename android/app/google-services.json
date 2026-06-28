@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "698998635993",
+    "project_id": "inppo-patrol-log",
+    "storage_bucket": "inppo-patrol-log.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:698998635993:android:796084a8b93c31b03bedc8",
+        "android_client_info": {
+          "package_name": "com.pnp.geotracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClL6F-VDucW3uzCTEPI1Sp-r5dlBUzXOs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

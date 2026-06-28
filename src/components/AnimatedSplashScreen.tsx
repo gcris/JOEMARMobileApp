@@ -189,14 +189,14 @@ export const AnimatedSplashScreen: React.FC<AnimatedSplashScreenProps> = ({
             Ilocos Norte Police Provincial Office
           </Text>
           <Text style={[styles.brandTitle, { color: colors.textMain }]}>
-            Patrol Tracker v1.0
+            Project J.O.E.M.A.R v1.0
           </Text>
         </View>
 
         {/* OFFICIAL ILOCOS NORTE PNP EMBLEM */}
         <View style={styles.logoStage}>
           <Animated.Image
-            source={require("../assets/logo.png")}
+            source={require("../assets/splash-logo.png")}
             style={[styles.logoImage, { opacity: logoOpacity }]}
             resizeMode="contain"
           />

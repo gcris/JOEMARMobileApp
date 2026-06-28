@@ -9,9 +9,7 @@ export const getPersonnelByBadge = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select(
-        "*, rank(*), unit(*), patrol_schedule(*, schedule_assignments(*))",
-      )
+      .select("*, rank(*), unit(*), schedule_assignments(*)")
       .eq("badge_number", badgeNumber)
       .single();
 
@@ -37,6 +35,7 @@ export const getPersonnelByBadge = async (
       role: data.role,
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
+      expo_push_token: data.expo_push_token,
     };
   } catch (error) {
     console.error("Error fetching personnel by badge:", error);
@@ -50,9 +49,7 @@ export const getPersonnelByEmail = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select(
-        "*, rank(*), unit(*), patrol_schedule(*, schedule_assignments(*))",
-      )
+      .select("*, rank(*), unit(*), schedule_assignments(*)")
       .eq("email", email.toLowerCase())
       .single();
 
@@ -77,6 +74,7 @@ export const getPersonnelByEmail = async (
       role: data.role,
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
+      expo_push_token: data.expo_push_token,
     };
   } catch (error) {
     console.error("Error fetching personnel by email:", error);
@@ -123,6 +121,7 @@ export const findCandidatePersonnel = async (
       role: data.role,
       // email: data.email,
       photo_url: data.photo_url, // Add photo URL
+      expo_push_token: data.expo_push_token,
     };
   } catch (error) {
     console.error("Error finding candidate personnel:", error);
@@ -136,9 +135,7 @@ export const getPersonnelById = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select(
-        "*, rank(*), unit(*), patrol_schedule(*, schedule_assignments(*))",
-      )
+      .select("*, rank(*), unit(*), schedule_assignments(*)")
       .eq("id", id)
       .single();
 
@@ -163,6 +160,7 @@ export const getPersonnelById = async (
       role: data.role,
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
+      expo_push_token: data.expo_push_token,
     };
   } catch (error) {
     console.error("Error fetching personnel by ID:", error);
@@ -176,7 +174,7 @@ export const savePersonnel = async (p: Personnel): Promise<void> => {
       {
         id: p.id,
         badge_number: p.badgeNumber,
-        rank: p.rank,
+        // rank: p.rank,
         rank_id: p.rankId,
         fullname: p.fullname,
         unit_id: p.unitId,
@@ -184,8 +182,8 @@ export const savePersonnel = async (p: Personnel): Promise<void> => {
         phone_number: p.phoneNumber,
         viber_number: p.viberNumber,
         is_approved: p.isApproved ? 1 : 0,
-        role: p.role,
-        email: p.email,
+        // role: p.role,
+        // email: p.email,
         photo_url: p.photo_url, // Add photo URL
       },
       {
@@ -266,20 +264,54 @@ export const getScheduleByPersonnel = async (
   personnelId: string,
 ): Promise<Schedule[] | null> => {
   try {
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    // 1. Query from assignments, force inner join filtering on today's date
     const { data, error } = await supabase
-      .from("patrol_schedule")
-      .select("*, schedule_assignments (*, personnel(*, rank(*)))")
-      .eq("schedule_assignments.personnel_id", personnelId)
-      .eq("date", new Date().toISOString().split("T")[0]);
+      .from("schedule_assignments")
+      .select(
+        `
+        id,
+        personnel_id,
+        patrol_schedule!inner (
+          id,
+          date,
+          time_from,
+          time_to,
+          sector,
+          patrol_type,
+          unit_id,
+          schedule_assignments (
+            personnel (
+              fullname,
+              phone_number,
+              viber_number,
+              rank (
+                rank_name
+              )
+            )
+          )
+        )
+      `,
+      )
+      .eq("personnel_id", personnelId)
+      .eq("patrol_schedule.date", todayStr)
+      .order("time_from", {
+        foreignTable: "patrol_schedule",
+        ascending: false,
+      });
 
     if (error && error.code !== "PGRST116") {
       throw error;
     }
 
-    if (!data) return null;
+    if (!data || data.length === 0) return null;
 
-    return data.map((item) => {
-      // Map through all assignments for this specific shift row
+    // 2. Map through the matching assignments and extract the complete parent schedule
+    return data.map((assignmentRow: any) => {
+      const item = assignmentRow.patrol_schedule;
+
+      // 3. Extract ALL personnel assigned to this schedule, not just the filter target
       const assignedOfficers = (item.schedule_assignments || []).map(
         (assignment: any) => ({
           rank_name: assignment.personnel?.rank?.rank_name || "Unranked",
@@ -288,6 +320,8 @@ export const getScheduleByPersonnel = async (
           viber_number: assignment.personnel?.viber_number,
         }),
       );
+
+      console.log("All assigned officers for this shift:", assignedOfficers);
 
       return {
         id: item.id,
@@ -298,7 +332,7 @@ export const getScheduleByPersonnel = async (
         duty_type: item.patrol_type,
         unitId: item.unit_id,
         personnelId: personnelId,
-        personnel: assignedOfficers, // This is now a clean array of all assigned personnel
+        personnel: assignedOfficers, // Clean array containing the entire shift team
       };
     });
   } catch (error) {
@@ -380,12 +414,16 @@ export const getUnsyncedLogs = async (): Promise<PersonnelLog[]> => {
   }
 };
 
-export const getLatestLogs = async (limit = 100): Promise<PersonnelLog[]> => {
+export const getLatestLogs = async (
+  personnel_id: string,
+  limit = 100,
+): Promise<PersonnelLog[]> => {
   try {
     // Get latest logs from Supabase
     const { data: supabaseData, error: supabaseError } = await supabase
       .from("personnel_logs")
       .select("*")
+      .eq("personnel_id", personnel_id)
       .order("captured_at", { ascending: false })
       .limit(limit);
 
@@ -482,58 +520,6 @@ export const cleanSyncedLogs = async (): Promise<void> => {
     await AsyncStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(unsyncedLogs));
   } catch (error) {
     console.error("Error cleaning synced logs:", error);
-    throw error;
-  }
-};
-
-// --- Registration Function ---
-export const registerPersonnel = async (
-  id: string,
-  email: string,
-  password: string,
-  // fullname?: string,
-  // phoneNumber?: string,
-  // viberNumber?: string,
-  // photoUrl?: string, // Add photoUrl parameter
-): Promise<boolean> => {
-  try {
-    // Note: password handling is done through Supabase Auth, not stored in public table
-    // This function updates the public.personnel table with non-sensitive profile data
-    const { data: existingAuthUser, error: fetchError } =
-      await supabaseAdmin.auth.admin.getUserById(id);
-
-    if (existingAuthUser.user) {
-      return false;
-    }
-    const { error } = await supabaseAdmin.auth.admin.createUser({
-      id: id,
-      email: email,
-      password: password,
-      email_confirm: true,
-    });
-
-    if (error) return false;
-    return true;
-    // if (signUpError) throw signUpError;
-
-    // const updates: any = {
-    //   //email: email.trim().toLowerCase(),
-    //   fullname: fullname || "",
-    // };
-
-    // if (phoneNumber) updates.phone_number = phoneNumber;
-    // if (viberNumber) updates.viber_number = viberNumber;
-    // if (photoUrl) updates.photo_url = photoUrl; // Add photo URL to updates
-
-    // // Set isApproved to false (0) for new registrations pending approval
-    // updates.is_approved = false;
-
-    // const { error } = await supabase
-    //   .from("personnel")
-    //   .update(updates)
-    //   .eq("id", id);
-  } catch (error) {
-    console.error("Error registering personnel:", error);
     throw error;
   }
 };

@@ -1,3 +1,4 @@
+import "react-native-gesture-handler";
 import React, { useState, useEffect } from "react";
 import {
   StatusBar,
@@ -19,6 +20,7 @@ import { DashboardView } from "./src/components/DashboardView";
 import { TopCommandHeader } from "./src/components/TopCommandHeader";
 import { AnimatedSplashScreen } from "./src/components/AnimatedSplashScreen";
 import { AccountScreen } from "./src/components/AccountScreen";
+import { registerNotificationLayouts } from "./src/services/BackgroundTracker";
 
 type RootStackParamList = {
   Main: undefined;
@@ -31,7 +33,6 @@ type RootStackParamList = {
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function App() {
-  // Police Dark Tactical Theme is active by default to replicate native Android exactly
   const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [viewMode, setViewMode] = useState<"login" | "register">("login");
@@ -39,41 +40,33 @@ export default function App() {
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
 
+  const patrolState = usePatrolState();
+
   const {
     personnel,
-    schedule,
-    logs,
-    unsyncedCount,
-    isShiftActive,
     isGpsEnabled,
     foregroundGranted,
     backgroundGranted,
     gpsLoading,
-    isSyncing,
-    autoSync,
     login,
     logout,
-    toggleShift,
-    syncLogsWithRemote,
-    flushSyncedCache,
     openSystemSettings,
     triggerEmergencySOS,
-    toggleAutoSync,
-    is2FAEnabled,
-    enable2FA,
-    disable2FA,
     requestForegroundPermission,
     requestBackgroundPermission,
     enableGpsInline,
     registerUser,
-  } = usePatrolState();
+  } = patrolState;
 
-  // Listen for the system-level persistent notification's SOS button clicks
+  useEffect(() => {
+    // Register the layout categories as soon as the app mounts
+    registerNotificationLayouts();
+  }, []);
+
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         if (response.actionIdentifier === "sos-button") {
-          // Trigger critical SOS sequence immediately
           triggerEmergencySOS();
         }
       },
@@ -96,7 +89,6 @@ export default function App() {
     );
   }
 
-  // If there's no authenticated officer, render target credentials login or register view
   if (!personnel) {
     return (
       <NavigationContainer>
@@ -130,7 +122,6 @@ export default function App() {
     );
   }
 
-  // Once credentials verification is complete, render active tactical screen layout
   return (
     <NavigationContainer>
       <StatusBar
@@ -138,32 +129,36 @@ export default function App() {
         backgroundColor={colors.bgDark}
       />
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen
-          name="Main"
-          component={() => (
+        <Stack.Screen name="Main">
+          {(props) => (
             <MainApp
+              {...props}
               isDarkTheme={isDarkTheme}
               handleToggleTheme={handleToggleTheme}
               logout={logout}
+              patrolState={patrolState} // <-- PASS THE ENTIRE STATE OBJECT HERE
             />
           )}
-        />
+        </Stack.Screen>
         <Stack.Screen name="Account" component={AccountScreenWrapper} />
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
 
-// Main app component that contains the dashboard and tab navigation
+// UPDATE MainApp TO ACCEPT patrolState AS A PROP
 function MainApp({
   isDarkTheme,
   handleToggleTheme,
   logout,
+  patrolState, // <-- Receive it here
 }: {
   isDarkTheme: boolean;
   handleToggleTheme: () => void;
   logout: () => void;
+  patrolState: ReturnType<typeof usePatrolState>; // <-- Type it using ReturnType
 }) {
+  // DESTUCTURE FROM THE PROP, DO NOT CALL usePatrolState() AGAIN
   const {
     personnel,
     schedule,
@@ -187,29 +182,28 @@ function MainApp({
     requestForegroundPermission,
     requestBackgroundPermission,
     enableGpsInline,
-  } = usePatrolState();
+  } = patrolState;
 
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
 
   return (
     <>
-      {/* Replicates TopCommandHeader inside native Compose */}
       <TopCommandHeader
         onLogout={logout}
         isDarkTheme={isDarkTheme}
         onToggleTheme={handleToggleTheme}
       />
 
-      {/* Persistent Red alert header active during shifts */}
       {isShiftActive && (
         <View style={styles.patrolNotificationBar}>
           <View style={styles.patrolNotificationInfo}>
             <Text style={styles.patrolNotificationTitle}>
-              🚨 ACTIVE SHIFT PATROL ENGAGED
+              ACTIVE SHIFT PATROL ENGAGED
             </Text>
             <Text style={styles.patrolNotificationSub}>
-              Background GPS active. Coordinates log to SQLite even when closed.
+              Background GPS active. Coordinates log to local storage even when
+              closed.
             </Text>
           </View>
           <TouchableOpacity
@@ -222,7 +216,6 @@ function MainApp({
         </View>
       )}
 
-      {/* Single-view dashboard wrapper that embeds tactical features, schedules, and security tools */}
       <DashboardView
         personnel={personnel}
         schedule={schedule}
@@ -252,7 +245,6 @@ function MainApp({
   );
 }
 
-// Wrapper for AccountScreen to pass the required props
 function AccountScreenWrapper({
   navigation,
   route,
@@ -267,7 +259,6 @@ function AccountScreenWrapper({
       personnelId={personnelId}
       isDarkTheme={isDarkTheme}
       onClose={() => {
-        // Navigate back to main app screen
         navigation.goBack();
       }}
     />

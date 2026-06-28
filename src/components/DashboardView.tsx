@@ -398,14 +398,14 @@ export const DashboardView = ({
 
         {/* OFFICER PROFILE CARD */}
         <View
-          style={[styles.card, { paddingVertical: 12, paddingHorizontal: 16 }]}
+          style={[styles.card, { paddingVertical: 5, paddingHorizontal: 10 }]}
         >
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             {/* Personnel Photo */}
             <View
               style={{
-                width: 48,
-                height: 48,
+                width: 64,
+                height: 64,
                 borderRadius: 6,
                 backgroundColor: isDarkTheme ? "#1E293B" : "#F1F5F9",
                 borderWidth: 1,
@@ -429,15 +429,26 @@ export const DashboardView = ({
               )}
             </View>
             <View style={{ marginLeft: 14, flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  width: "100%",
+                  flex: 1,
+                }}
+              >
                 <View
                   style={{
                     paddingHorizontal: 6,
                     paddingVertical: 2,
                     borderRadius: 4,
+                    flex: 1, // Takes available width
                   }}
                 >
                   <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.5}
                     style={{
                       fontSize: 22,
                       fontWeight: "bold",
@@ -468,6 +479,28 @@ export const DashboardView = ({
                   }}
                 >
                   {personnel?.designation}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontFamily: "monospace",
+                    color: colors.textSecondary,
+                    marginLeft: 8,
+                  }}
+                >
+                  {personnel?.phoneNumber || "No phone number"}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontFamily: "monospace",
+                    color: colors.textSecondary,
+                    marginLeft: 8,
+                  }}
+                >
+                  {personnel?.viberNumber || "No viber number"}
                 </Text>
               </View>
             </View>
@@ -544,7 +577,7 @@ export const DashboardView = ({
                 </Text>
               ) : (
                 logs.map((log, index) => {
-                  const isSos = log.speed === 999.0;
+                  const isSos = log.dutyType === "EMERGENCY_SOS";
                   const localTime =
                     log.capturedAt.split("T")[1]?.substring(0, 8) || "00:00:00";
                   return (
@@ -574,6 +607,8 @@ export const DashboardView = ({
                             {log.longitude.toFixed(5)}
                           </Text>
                           <Text style={styles.logCapturedText}>
+                            {log.capturedAt.split("T")[0]}
+                            {" at "}
                             {localTime}
                           </Text>
                         </View>
@@ -865,7 +900,7 @@ export const DashboardView = ({
                 </View>
               ) : (
                 <View style={{ padding: 20, alignItems: "center" }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 20 }}>
                     No active duty schedules assigned.
                   </Text>
                 </View>
@@ -1057,8 +1092,13 @@ export const DashboardView = ({
               });
             } else {
               // Handle case where personnel data is not available
-              console.warn("Personnel data not available for account navigation");
-              Alert.alert("Error", "Unable to load account information. Please try again later.");
+              console.warn(
+                "Personnel data not available for account navigation",
+              );
+              Alert.alert(
+                "Error",
+                "Unable to load account information. Please try again later.",
+              );
             }
           }}
         >

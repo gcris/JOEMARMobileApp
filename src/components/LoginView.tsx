@@ -9,9 +9,10 @@ import {
   Alert,
   Image,
 } from "react-native";
-import { useClipboard } from "@react-native-clipboard/clipboard";
+import Clipboard from "@react-native-clipboard/clipboard";
 import { getStyles, getThemeColors } from "../theme/styles";
-import { getOTPAuthUri } from "../services/totp";
+import { getOTPAuthUri } from "../services/supabaseMFA";
+import { usePatrolState } from "../hooks/usePatrolState";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 interface LoginViewProps {
@@ -22,7 +23,12 @@ interface LoginViewProps {
     password: string,
     otpCode?: string,
   ) => Promise<
-    boolean | "NEED_2FA" | "PENDING_APPROVAL" | "NOT_FOUND" | string
+    | boolean
+    | "NEED_2FA"
+    | "PENDING_APPROVAL"
+    | "NOT_FOUND"
+    | string
+    | "NEED_MFA_SETUP"
   >;
   onOpenSettings: () => void;
   isDarkTheme: boolean;
@@ -32,6 +38,7 @@ interface LoginViewProps {
   onRequestForeground: () => Promise<boolean>;
   onRequestBackground: () => Promise<boolean>;
   onEnableGpsInline: () => Promise<boolean>;
+  // Property for redirecting to registration screen
   onGoToRegister?: () => void;
 }
 
@@ -49,14 +56,17 @@ export const LoginView = ({
   onEnableGpsInline,
   onGoToRegister,
 }: LoginViewProps) => {
+  const { is2FAEnabled, enable2FA } = usePatrolState();
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("cimcshooting@gmail.com");
+  const [password, setPassword] = useState("123456");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [step, setStep] = useState<"credentials" | "otp">("credentials");
+  const [step, setStep] = useState<"credentials" | "otp" | "mfaSetup">(
+    "credentials",
+  );
   const [otp, setOtp] = useState("");
   const [mfaSecret, setMfaSecret] = useState("");
   const [loading, setLoading] = useState(false);
@@ -65,6 +75,14 @@ export const LoginView = ({
   const [notFoundState, setNotFoundState] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+
+  // MFA setup state
+  const [mfaSetupStep, setMfaSetupStep] = useState<
+    "idle" | "pending" | "verified"
+  >("idle");
+  const [mfaSetupSecret, setMfaSetupSecret] = useState<string>("");
+  const [mfaSetupCode, setMfaSetupCode] = useState<string>("");
+  const [mfaSetupLoading, setMfaSetupLoading] = useState(false);
 
   const handleSubmit = async () => {
     setLoading(false);
@@ -93,12 +111,75 @@ export const LoginView = ({
       const secretKey = res.split(":")[1];
       setMfaSecret(secretKey);
       setStep("otp");
+    } else if (typeof res === "string" && res.startsWith("NEED_MFA_SETUP:")) {
+      const secretKey = res.split(":")[1];
+      setMfaSetupSecret(secretKey);
+      setStep("mfaSetup");
+      setMfaSetupStep("idle"); // ready to show QR and input
     } else if (res === "PENDING_APPROVAL") {
       setPendingState(true);
     } else if (res === "NOT_FOUND") {
       setNotFoundState(true);
     } else if (typeof res === "string") {
       setErrorMessage(res);
+    }
+  };
+
+  const verifyMfaSetup = async () => {
+    if (!mfaSetupCode || mfaSetupCode.length !== 6) {
+      Alert.alert("Error", "Please enter a 6-digit code");
+      return;
+    }
+    setMfaSetupLoading(true);
+    try {
+      const isVerified = await enable2FA(mfaSetupSecret, mfaSetupCode);
+      if (!isVerified) {
+        Alert.alert(
+          "Verification Failed",
+          "The 6-digit code is incorrect. Please try again.",
+        );
+      } else {
+        // MFA setup successful, now try to log in with the OTP code
+        const loginResult = await onLogin(email, password, mfaSetupCode);
+        if (loginResult === true) {
+          // Login successful - reset form and stay on credentials step (will redirect to dashboard)
+          setEmail("");
+          setPassword("");
+          setOtp("");
+          setMfaSetupCode("");
+          setMfaSetupStep("idle");
+          setStep("credentials");
+        } else if (typeof loginResult === "string") {
+          // Login failed - show error and reset to credentials
+          setErrorMessage(loginResult);
+          setEmail("");
+          setPassword("");
+          setOtp("");
+          setMfaSetupCode("");
+          setMfaSetupStep("idle");
+          setStep("credentials");
+        } else {
+          // Unexpected result
+          Alert.alert("Error", "Unexpected login result");
+          setEmail("");
+          setPassword("");
+          setOtp("");
+          setMfaSetupCode("");
+          setMfaSetupStep("idle");
+          setStep("credentials");
+        }
+      }
+    } catch (err) {
+      console.error("MFA verification error:", err);
+      Alert.alert("Error", "Failed to verify MFA code");
+      setEmail("");
+      setPassword("");
+      setOtp("");
+      setMfaSetupCode("");
+      setMfaSetupStep("idle");
+      setStep("credentials");
+    } finally {
+      setMfaSetupLoading(false);
     }
   };
 
@@ -263,7 +344,7 @@ export const LoginView = ({
           }}
         >
           <Image
-            source={require("../assets/logo.png")}
+            source={require("../assets/signin-logo.png")}
             style={{ width: 90, height: 110 }}
             resizeMode="contain"
           />
@@ -291,7 +372,7 @@ export const LoginView = ({
             textAlign: "center",
           }}
         >
-          Patrol Tracker v1.0
+          Project J.O.E.M.A.R v1.0
         </Text>
 
         <View style={{ height: 32 }} />
@@ -835,7 +916,7 @@ export const LoginView = ({
               </TouchableOpacity>
             )}
           </View>
-        ) : (
+        ) : step === "otp" ? (
           <View
             style={[
               styles.formCard,
@@ -896,117 +977,6 @@ export const LoginView = ({
               Enter the current 6-digit code from Google Authenticator to join
               active patrol shift status.
             </Text>
-
-            {mfaSecret
-              ? (() => {
-                  const otpauthUri = getOTPAuthUri(
-                    email || "patroller",
-                    mfaSecret,
-                  );
-                  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(otpauthUri)}`;
-                  return (
-                    <View
-                      style={{
-                        backgroundColor: isDarkTheme ? "#0B121F" : "#F8FAFC",
-                        padding: 16,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
-                        marginBottom: 16,
-                        alignItems: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: isDarkTheme ? "#FACC15" : "#1E3A8A",
-                          fontSize: 10,
-                          fontWeight: "900",
-                          letterSpacing: 0.5,
-                          marginBottom: 12,
-                        }}
-                      >
-                        GOOGLE AUTHENTICATOR QR SETUP
-                      </Text>
-
-                      {/* QR Code Container with white background for perfect scanning */}
-                      <View
-                        style={{
-                          backgroundColor: "#FFFFFF",
-                          padding: 8,
-                          borderRadius: 8,
-                          marginBottom: 12,
-                          borderWidth: 1,
-                          borderColor: "#E2E8F0",
-                          shadowColor: "#000",
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowOpacity: 0.1,
-                          shadowRadius: 4,
-                          elevation: 1,
-                        }}
-                      >
-                        <Image
-                          source={{ uri: qrCodeUrl }}
-                          style={{ width: 160, height: 160 }}
-                          resizeMode="contain"
-                        />
-                      </View>
-
-                      <Text
-                        style={{
-                          color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                          fontSize: 11,
-                          fontWeight: "bold",
-                          fontFamily: "monospace",
-                          letterSpacing: 1,
-                          marginBottom: 4,
-                        }}
-                      >
-                        Key: {mfaSecret}
-                      </Text>
-                      <Text
-                        style={{
-                          color: isDarkTheme ? "#94A3B8" : "#64748B",
-                          fontSize: 9,
-                          textAlign: "center",
-                          marginBottom: 8,
-                          paddingHorizontal: 10,
-                        }}
-                      >
-                        Scan this QR code with your Google Authenticator app or
-                        copy the setup key below manually.
-                      </Text>
-
-                      <TouchableOpacity
-                        style={{
-                          backgroundColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
-                          paddingVertical: 5,
-                          paddingHorizontal: 12,
-                          borderRadius: 4,
-                          borderColor: isDarkTheme ? "#334155" : "#CBD5E1",
-                          borderWidth: 1,
-                        }}
-                        onPress={() => {
-                          useClipboard.apply(mfaSecret);
-                          Alert.alert(
-                            "Secret Copied",
-                            "Google Authenticator secret copied to device clipboard. Standard key input type inside your device Authenticator app.",
-                          );
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                            fontSize: 10,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          📋 COPY SETUP KEY
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })()
-              : null}
 
             <Text
               style={{
@@ -1089,7 +1059,242 @@ export const LoginView = ({
               </Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : step === "mfaSetup" ? (
+          <View
+            style={[
+              styles.formCard,
+              {
+                width: "100%",
+                borderRadius: 16,
+                padding: 24,
+                borderWidth: 1,
+                borderColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
+                backgroundColor: isDarkTheme ? "#142035" : "#FFFFFF",
+              },
+            ]}
+          >
+            <View
+              style={{
+                backgroundColor: isDarkTheme ? "#1E293B" : "#DBEAFE",
+                padding: 10,
+                borderRadius: 6,
+                marginVertical: 12,
+                borderWidth: 1,
+                borderColor: isDarkTheme ? "#334155" : "#BFDBFE",
+                alignItems: "center",
+              }}
+            >
+              <Text
+                style={{
+                  color: isDarkTheme ? "#FACC15" : "#1E3A8A",
+                  fontSize: 20,
+                  fontWeight: "bold",
+                }}
+              >
+                GOOGLE AUTHENTICATOR SETUP
+              </Text>
+            </View>
+
+            <Text
+              style={{
+                color: isDarkTheme ? "#94A3B8" : "#475569",
+                fontSize: 15,
+                textAlign: "center",
+                lineHeight: 18,
+                marginBottom: 16,
+              }}
+            >
+              Scan the QR code below with Google Authenticator, then enter the
+              6-digit code to activate MFA for your account.
+            </Text>
+
+            {mfaSetupSecret ? (
+              (() => {
+                const otpauthUri = getOTPAuthUri(
+                  email || "patroller",
+                  mfaSetupSecret,
+                );
+                const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+                  otpauthUri,
+                )}`;
+                return (
+                  <View
+                    style={{
+                      backgroundColor: isDarkTheme ? "#0B121F" : "#F8FAFC",
+                      padding: 16,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
+                      marginBottom: 16,
+                      alignItems: "center",
+                    }}
+                  >
+                    {/* QR Code Container with white background for perfect scanning */}
+                    <View
+                      style={{
+                        backgroundColor: "#FFFFFF",
+                        padding: 8,
+                        borderRadius: 8,
+                        marginBottom: 12,
+                        borderWidth: 1,
+                        borderColor: "#E2E8F0",
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4,
+                        elevation: 1,
+                      }}
+                    >
+                      <Image
+                        source={{ uri: qrCodeUrl }}
+                        style={{ width: 240, height: 240 }}
+                        resizeMode="contain"
+                      />
+                    </View>
+                    <Text
+                      style={{
+                        color: isDarkTheme ? "#94A3B8" : "#64748B",
+                        fontSize: 16,
+                        textAlign: "center",
+                        marginBottom: 8,
+                        paddingHorizontal: 2,
+                      }}
+                    >
+                      Scan this QR code with your Google Authenticator app or
+                      copy the setup key below manually.
+                    </Text>
+
+                    <TouchableOpacity
+                      style={{
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
+                        paddingVertical: 5,
+                        paddingHorizontal: 12,
+                        borderRadius: 4,
+                        borderColor: isDarkTheme ? "#334155" : "#CBD5E1",
+                        borderWidth: 1,
+                      }}
+                      onPress={() => {
+                        Clipboard.setString(mfaSetupSecret);
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isDarkTheme ? "#FFFFFF" : "#0F172A",
+                          fontSize: 15,
+                          fontWeight: "bold",
+                        }}
+                      >
+                        COPY SETUP KEY
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()
+            ) : mfaSetupLoading ? (
+              <View
+                style={{
+                  alignItems: "center",
+                  padding: 20,
+                }}
+              >
+                <ActivityIndicator
+                  size="large"
+                  color={isDarkTheme ? "#FFFFFF" : "#0B121F"}
+                />
+                <Text style={{ marginTop: 12, color: "#666" }}>
+                  Setting up...
+                </Text>
+              </View>
+            ) : (
+              <View>
+                <Text>Initializing...</Text>
+              </View>
+            )}
+
+            <Text
+              style={{
+                fontSize: 20,
+                fontWeight: "bold",
+                color: isDarkTheme
+                  ? "rgba(248,250,252,0.7)"
+                  : "rgba(15,23,42,0.7)",
+                marginBottom: 6,
+                textAlign: "center",
+              }}
+            >
+              6 Digit Verification Code
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  textAlign: "center",
+                  fontSize: 40,
+                  letterSpacing: 8,
+                  fontWeight: "bold",
+                  marginBottom: 16,
+                },
+              ]}
+              value={mfaSetupCode}
+              onChangeText={(v) =>
+                setMfaSetupCode(v.replace(/[^0-9]/g, "").substring(0, 6))
+              }
+              placeholder="000000"
+              placeholderTextColor={isDarkTheme ? "#64748B" : "#94A3B8"}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#10B981",
+                borderRadius: 12,
+                height: 50,
+                justifyContent: "center",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+              onPress={verifyMfaSetup}
+              disabled={mfaSetupLoading}
+            >
+              {mfaSetupLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text
+                  style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 20 }}
+                >
+                  Verify
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                alignItems: "center",
+                paddingVertical: 12,
+                borderWidth: 1,
+                borderColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
+                borderRadius: 12,
+              }}
+              onPress={() => {
+                setStep("credentials");
+                setMfaSetupStep("idle");
+                setMfaSetupSecret("");
+                setMfaSetupCode("");
+              }}
+            >
+              <Text
+                style={{
+                  color: isDarkTheme ? "#94A3B8" : "#475569",
+                  fontSize: 20,
+                  fontWeight: "bold",
+                }}
+              >
+                Go back to Sign in
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );

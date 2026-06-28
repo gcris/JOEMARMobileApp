@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from "./supabase";
+import { supabase, isSupabaseConfigured, supabaseAdmin } from "./supabase";
 
 export interface MFAEnrollmentResult {
   id: string;
@@ -20,15 +20,15 @@ export const enrollMFA = async (
   try {
     const { data, error } = await supabase.auth.mfa.enroll({
       factorType: "totp",
-      issuer: "INPPO-Itrack",
-      friendlyName: `INPPO-Geo Tracker`,
+      issuer: "INPPO",
+      friendlyName: `Project J.O.E.M.A.R`,
     });
     if (error) {
       throw error;
     }
     if (data && data.totp) {
       const localSecret = data.totp.secret;
-      const customUri = `otpauth://totp/${email}?secret=${localSecret}&issuer=INPPO-Itrack&algorithm=SHA1&digits=6&period=30`;
+      const customUri = `otpauth://totp/${email}?secret=${localSecret}&issuer=INPPO&algorithm=SHA1&digits=6&period=30`;
 
       return {
         id: data.id,
@@ -64,6 +64,7 @@ export const verifyMFAEnrollment = async (
   }
 
   try {
+    console.log("factorId: ", factorId);
     // 1. Create Supabase Challenge
     const { data: challengeData, error: challengeError } =
       await supabase.auth.mfa.challenge({ factorId });
@@ -87,6 +88,7 @@ export const verifyMFAEnrollment = async (
       return false;
     }
 
+    await supabase.auth.refreshSession();
     return true;
   } catch (err) {
     console.error("Real Supabase MFA verify failed:", err);
@@ -107,10 +109,12 @@ export const checkMFAStatus = async (
   try {
     const { data, error } = await supabase.auth.mfa.listFactors();
     if (error) throw error;
+
     if (!data || !data.all) {
       return { isEnabled: false };
     }
 
+    console.log("data: ", data);
     // Find verified factor
     const verifiedFactor = data.all.find((f) => f.status === "verified");
     if (verifiedFactor) {
@@ -144,3 +148,13 @@ export const unenrollMFA = async (factorId: string): Promise<boolean> => {
     throw err;
   }
 };
+
+/**
+ * Generates the standard google authenticator otpauth scheme Uri
+ * (allows users who want to print or construct their own uri QR generator)
+ */
+export function getOTPAuthUri(badge: string, secret: string): string {
+  const label = encodeURIComponent(`Project J.O.E.M.A.R (${badge})`);
+  const issuer = encodeURIComponent("INPPO");
+  return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+}

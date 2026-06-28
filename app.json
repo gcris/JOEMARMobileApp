@@ -1,16 +1,31 @@
 {
   "expo": {
-    "name": "PNP Patroller Geotracker",
+    "name": "Project JOEMAR",
     "slug": "pnp-geo-tracker-rn",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./src/assets/logo.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pnp.geotracker"
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/logo.png",
+        "backgroundColor": "#ffffff"
+      },
       "package": "com.pnp.geotracker",
+      "googleServicesFile": "./google-services.json",
+      "splash": {
+        "image": "./src/assets/splash-logo.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#ffffff"
+      },
       "permissions": [
         "ACCESS_BACKGROUND_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -32,6 +47,18 @@
         {
           "locationAlwaysPermission": "Allow this app to access your location in the background.",
           "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./src/assets/sounds/sos_alert.wav"]
+        }
+      ],
+      [
+        "expo-asset",
+        {
+          "assets": ["./src/assets/sounds/sos_alert.wav"]
         }
       ]
     ],
