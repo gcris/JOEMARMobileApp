@@ -62,14 +62,8 @@ export const DashboardView = ({
   isSyncing,
   onToggleShift,
   onSync,
-  onClearCache,
   onOpenSettings,
   onEmergencySOS,
-  autoSync,
-  onToggleAutoSync,
-  is2FAEnabled,
-  onEnable2FA,
-  onDisable2FA,
   isDarkTheme,
   foregroundGranted,
   backgroundGranted,
@@ -85,73 +79,6 @@ export const DashboardView = ({
   const [activeNav, setActiveNav] = useState<"home" | "sos" | "account">(
     "home",
   );
-
-  // TOTP local setup states
-  const [isSettingUp2FA, setIsSettingUp2FA] = useState(false);
-  const [mfaSecret, setMfaSecret] = useState("");
-  const [mfaFactorId, setMfaFactorId] = useState("");
-  const [mfaToken, setMfaToken] = useState("");
-  const [mfaLoading, setMfaLoading] = useState(false);
-
-  const start2FASetup = async () => {
-    setMfaLoading(true);
-    try {
-      const email = personnel?.email || "";
-      const result = await enrollMFA(email);
-      setMfaSecret(result.secret);
-      setMfaFactorId(result.id);
-      setMfaToken("");
-      setIsSettingUp2FA(true);
-    } catch (err) {
-      console.warn("MFA Setup Initialization Error", err);
-      Alert.alert(
-        "Setup Error",
-        "Failed to contact Supabase Auth to register dynamic MFA factors.",
-      );
-    } finally {
-      setMfaLoading(false);
-    }
-  };
-
-  const handleCopySecret = () => {
-    Clipboard.setString(mfaSecret);
-    Alert.alert(
-      "Secret Copied",
-      "Your Two-Factor setup key has been saved to device clipboard.",
-    );
-  };
-
-  const handleEnable2FAConfirm = async () => {
-    if (mfaToken.trim().length !== 6) {
-      Alert.alert(
-        "Verify Error",
-        "Please enter a valid 6-digit verification code.",
-      );
-      return;
-    }
-    setMfaLoading(true);
-    const success = await onEnable2FA(mfaSecret, mfaToken.trim(), mfaFactorId);
-    setMfaLoading(false);
-    if (success) {
-      setIsSettingUp2FA(false);
-      setMfaToken("");
-    }
-  };
-
-  const handleDisable2FAConfirm = () => {
-    Alert.alert(
-      "Disable MFA Protection?",
-      "Warning: Disabling Two-Factor Authorization decreases account safety. PNP guidelines suggest maintaining active authenticator link locks.",
-      [
-        {
-          text: "Confirm Disable",
-          style: "destructive",
-          onPress: onDisable2FA,
-        },
-        { text: "Cancel", style: "cancel" },
-      ],
-    );
-  };
 
   const handlePhoneCall = (phoneNumber: string) => {
     if (!phoneNumber) return;

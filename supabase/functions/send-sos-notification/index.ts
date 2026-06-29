@@ -32,7 +32,7 @@ serve(async (req) => {
     // 3. Fetch the sender's details to build a helpful alert message
     const { data: sender, error: senderError } = await supabaseAdmin
       .from("personnel")
-      .select("unit_id, fullname, rank:rank_id(rank_name)")
+      .select("phone_number, unit_id, fullname, rank:rank_id(rank_name)")
       .eq("id", record.personnel_id)
       .single();
 
@@ -77,7 +77,7 @@ serve(async (req) => {
     const messages = tokens.map((token) => ({
       to: token,
       title: "DISTRESS SIGNAL TRIGGERED",
-      body: `${senderName} needs immediate assistance!`,
+      body: `${senderName} needs immediate assistance! Tap to view details.`,
       priority: "high",
       sound: "sos_alert.wav",
       channelId: "emergency-alerts-v4", // Matches your high-importance Android channel configuration
@@ -91,6 +91,7 @@ serve(async (req) => {
         latitude: record.latitude, // Passed securely so the app's tap handler can read it
         longitude: record.longitude,
         senderName: senderName,
+        phone_number: sender.phone_number,
       },
     }));
 

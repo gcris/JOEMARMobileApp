@@ -10,38 +10,48 @@ export interface MFAEnrollmentResult {
 /**
  * Enrolls a new TOTP MFA factor in Supabase.
  */
-export const enrollMFA = async (
-  email: string,
-): Promise<MFAEnrollmentResult> => {
-  if (!isSupabaseConfigured()) {
-    throw new Error("Supabase is not configured");
-  }
-
+export const enrollMFA = async (email: string) => {
   try {
-    const { data, error } = await supabase.auth.mfa.enroll({
-      factorType: "totp",
-      issuer: "INPPO",
-      friendlyName: `Project J.O.E.M.A.R`,
-    });
-    if (error) {
-      throw error;
-    }
-    if (data && data.totp) {
-      const localSecret = data.totp.secret;
-      const customUri = `otpauth://totp/${email}?secret=${localSecret}&issuer=INPPO&algorithm=SHA1&digits=6&period=30`;
+    const { verifiedFactor, pendingFactor } = await getExistingMFAFactor();
 
+    // Already enrolled
+    if (verifiedFactor) {
       return {
-        id: data.id,
-        type: "totp",
-        secret: localSecret,
-        uri: customUri,
+        alreadyVerified: true,
+        factorId: verifiedFactor.id,
       };
     }
 
-    throw new Error("Failed to enroll MFA factor");
-  } catch (err) {
-    console.error("Real Supabase MFA enrollment failed:", err);
-    throw err;
+    // Enrollment was started previously but not completed
+    if (pendingFactor) {
+      return {
+        pendingEnrollment: true,
+        factorId: pendingFactor.id,
+      };
+    }
+
+    // No factor exists, create a new one
+    const { data, error } = await supabase.auth.mfa.enroll({
+      factorType: "totp",
+      friendlyName: "Project J.O.E.M.A.R",
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const secret = data.totp?.secret || data.totp?.qr_code || "";
+
+    return {
+      factorId: data.id,
+      secret,
+      qrCode: data.totp?.qr_code,
+      pendingEnrollment: false,
+      alreadyVerified: false,
+    };
+  } catch (error) {
+    console.error("MFA enrollment failed:", error);
+    throw error;
   }
 };
 
@@ -49,11 +59,9 @@ export const enrollMFA = async (
  * Verifies a code against an enrolled MFA factor.
  * Challenges the factor first to follow true Supabase protocol semantics, then verifies.
  */
-export const verifyMFAEnrollment = async (
-  email: string,
+export const verifyMFAChallenge = async (
   factorId: string,
   code: string,
-  secretKey?: string,
 ): Promise<boolean> => {
   if (!isSupabaseConfigured()) {
     throw new Error("Supabase is not configured");
@@ -64,7 +72,6 @@ export const verifyMFAEnrollment = async (
   }
 
   try {
-    console.log("factorId: ", factorId);
     // 1. Create Supabase Challenge
     const { data: challengeData, error: challengeError } =
       await supabase.auth.mfa.challenge({ factorId });
@@ -80,6 +87,10 @@ export const verifyMFAEnrollment = async (
         code,
       });
 
+    console.log("factorId: ", factorId);
+    console.log("challengeData.id: ", challengeData.id);
+    console.log("code: ", code);
+
     if (verifyError) {
       console.warn(
         "Supabase MFA Verify challenge failed:",
@@ -88,7 +99,6 @@ export const verifyMFAEnrollment = async (
       return false;
     }
 
-    await supabase.auth.refreshSession();
     return true;
   } catch (err) {
     console.error("Real Supabase MFA verify failed:", err);
@@ -101,27 +111,46 @@ export const verifyMFAEnrollment = async (
  */
 export const checkMFAStatus = async (
   email: string,
-): Promise<{ isEnabled: boolean; factorId?: string; secret?: string }> => {
+): Promise<{
+  isEnabled: boolean;
+  factorId?: string;
+  secret?: string;
+  user_id?: string;
+}> => {
   if (!isSupabaseConfigured()) {
     throw new Error("Supabase is not configured");
   }
 
   try {
-    const { data, error } = await supabase.auth.mfa.listFactors();
-    if (error) throw error;
+    const { data, error } = await supabase.rpc("get_mfa_factors_by_email", {
+      target_email: email.trim().toLowerCase(), // Normalize inputs safely
+    });
 
-    if (!data || !data.all) {
-      return { isEnabled: false };
-    }
+    if (error) return { isEnabled: false };
 
-    console.log("data: ", data);
-    // Find verified factor
-    const verifiedFactor = data.all.find((f) => f.status === "verified");
-    if (verifiedFactor) {
-      return { isEnabled: true, factorId: verifiedFactor.id };
-    }
+    return {
+      isEnabled: data[0].status === "verified",
+      factorId: data[0].factor_id,
+      secret: data[0].secret,
+      user_id: data[0].user_id,
+    };
 
-    return { isEnabled: false };
+    // const { data, error } = await supabase.auth.mfa.listFactors();
+    // if (error) throw error;
+
+    // if (!data || !data.all) {
+    //   return { isEnabled: false };
+    // }
+
+    // // Find verified factor
+    // const verifiedFactor = data.all.find(
+    //   (factor) => factor.status === "verified",
+    // );
+    // if (verifiedFactor) {
+    //   return { isEnabled: true, factorId: verifiedFactor.id };
+    // }
+
+    // return { isEnabled: false };
   } catch (err) {
     console.error("Error checking MFA status:", err);
     throw err;
@@ -158,3 +187,22 @@ export function getOTPAuthUri(badge: string, secret: string): string {
   const issuer = encodeURIComponent("INPPO");
   return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
 }
+
+export const getExistingMFAFactor = async () => {
+  const { data, error } = await supabase.auth.mfa.listFactors();
+
+  if (error) {
+    throw error;
+  }
+
+  const verifiedFactor = data.all.find(
+    (factor) => factor.status === "verified",
+  );
+
+  const pendingFactor = data.all.find((factor) => factor.status !== "verified");
+
+  return {
+    verifiedFactor,
+    pendingFactor,
+  };
+};

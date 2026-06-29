@@ -36,7 +36,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   enrollMFA,
-  verifyMFAEnrollment,
+  verifyMFAChallenge,
   checkMFAStatus,
   unenrollMFA,
 } from "../services/supabaseMFA";
@@ -46,6 +46,25 @@ import Constants from "expo-constants";
 // Async storage keys for pending MFA verification
 const PENDING_MFA_USER_ID_KEY = "@pnp_pending_mfa_user_id";
 const PENDING_MFA_PERSONNEL_KEY = "@pnp_pending_mfa_personnel";
+
+export type LoginResult =
+  | { status: "SUCCESS" }
+  | { status: "NOT_FOUND" }
+  | { status: "PENDING_APPROVAL" }
+  | { status: "NEED_MFA_LOGIN"; factorId: string }
+  | {
+      status: "NEED_MFA_SETUP";
+      factorId: string;
+      secret: string;
+    }
+  | {
+      status: "NEED_MFA_VERIFICATION";
+      factorId: string;
+    }
+  | {
+      status: "ERROR";
+      message: string;
+    };
 
 export const usePatrolState = () => {
   const [personnel, setPersonnel] = useState<Personnel | null>(null);
@@ -67,20 +86,11 @@ export const usePatrolState = () => {
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(false);
+  const [notificationGranted, setNotificationGranted] = useState<
+    boolean | null
+  >(null);
   const [isWithinScheduledTime, setIsWithinScheduledTime] = useState(false);
   const [activeDutyType, setActiveDutyType] = useState<string | null>(null);
-
-  const appStateRef = useRef(AppState.currentState);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (nextAppState) => {
-      appStateRef.current = nextAppState;
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
 
   // Checks device's system GPS and permission status
   const checkLocationPermissionState = useCallback(async () => {
@@ -140,6 +150,39 @@ export const usePatrolState = () => {
     } catch (e) {
       setGpsLoading(false);
       console.warn("Enable network provider error", e);
+      return false;
+    }
+  };
+
+  // Notification permission functions
+  const checkNotificationPermissionState = useCallback(async () => {
+    try {
+      const { status: existingStatus } =
+        await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== "granted") {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      setNotificationGranted(finalStatus === "granted");
+      return finalStatus === "granted";
+    } catch {
+      setNotificationGranted(false);
+      return false;
+    }
+  }, []);
+
+  const requestNotificationPermissions = async () => {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      const granted = status === "granted";
+      setNotificationGranted(granted);
+      await checkNotificationPermissionState();
+      return granted;
+    } catch (e) {
+      console.warn("Notification permission request error", e);
       return false;
     }
   };
@@ -264,190 +307,190 @@ export const usePatrolState = () => {
   }, [personnel]);
 
   // Check for auto-login request from notification tap AND active patrol session
-  useEffect(() => {
-    const checkAutoLoginAndResume = async () => {
-      try {
-        // FIRST: Check if we have pending MFA data (user is in middle of MFA setup)
-        const pendingUserId = await AsyncStorage.getItem(
-          PENDING_MFA_USER_ID_KEY,
-        );
-        const pendingPersonnelJson = await AsyncStorage.getItem(
-          PENDING_MFA_PERSONNEL_KEY,
-        );
+  // useEffect(() => {
+  //   const checkAutoLoginAndResume = async () => {
+  //     try {
+  //       // FIRST: Check if we have pending MFA data (user is in middle of MFA setup)
+  //       const pendingUserId = await AsyncStorage.getItem(
+  //         PENDING_MFA_USER_ID_KEY,
+  //       );
+  //       const pendingPersonnelJson = await AsyncStorage.getItem(
+  //         PENDING_MFA_PERSONNEL_KEY,
+  //       );
 
-        if (pendingUserId && pendingPersonnelJson) {
-          try {
-            const pendingPersonnel = JSON.parse(pendingPersonnelJson);
-            // Validate that the pending personnel data is valid
-            if (pendingPersonnel && pendingPersonnel.id === pendingUserId) {
-              // Set personnel state from pending MFA data
-              setPersonnel(pendingPersonnel);
+  //       if (pendingUserId && pendingPersonnelJson) {
+  //         try {
+  //           const pendingPersonnel = JSON.parse(pendingPersonnelJson);
+  //           // Validate that the pending personnel data is valid
+  //           if (pendingPersonnel && pendingPersonnel.id === pendingUserId) {
+  //             // Set personnel state from pending MFA data
+  //             setPersonnel(pendingPersonnel);
 
-              // Load associated data
-              const assignedSched = await getScheduleByPersonnel(
-                pendingPersonnel.id,
-              );
-              if (assignedSched) {
-                setSchedule(assignedSched);
-              }
+  //             // Load associated data
+  //             const assignedSched = await getScheduleByPersonnel(
+  //               pendingPersonnel.id,
+  //             );
+  //             if (assignedSched) {
+  //               setSchedule(assignedSched);
+  //             }
 
-              loadLogsAndStats();
-              updateUnsyncedCounter();
+  //             loadLogsAndStats();
+  //             updateUnsyncedCounter();
 
-              console.log(
-                "[Auto-resume] Restored personnel state from pending MFA data for user:",
-                pendingUserId,
-              );
+  //             console.log(
+  //               "[Auto-resume] Restored personnel state from pending MFA data for user:",
+  //               pendingUserId,
+  //             );
 
-              // Clear the pending MFA data since we've restored it
-              await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-              await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+  //             // Clear the pending MFA data since we've restored it
+  //             await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+  //             await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
 
-              return; // Important: return early to avoid overwriting with other login attempts
-            }
-          } catch (parseError) {
-            console.warn(
-              "Failed to parse pending MFA personnel data:",
-              parseError,
-            );
-            // Clear invalid pending data
-            await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-            await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
-          }
-        }
+  //             return; // Important: return early to avoid overwriting with other login attempts
+  //           }
+  //         } catch (parseError) {
+  //           console.warn(
+  //             "Failed to parse pending MFA personnel data:",
+  //             parseError,
+  //           );
+  //           // Clear invalid pending data
+  //           await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+  //           await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+  //         }
+  //       }
 
-        // SECOND: Check if auto-login was requested from notification tap
-        const autoLoginRequested = await AsyncStorage.getItem(
-          "@pnp_auto_login_requested",
-        );
-        if (autoLoginRequested === "true") {
-          // Clear the flag
-          await AsyncStorage.removeItem("@pnp_auto_login_requested");
+  //       // SECOND: Check if auto-login was requested from notification tap
+  //       const autoLoginRequested = await AsyncStorage.getItem(
+  //         "@pnp_auto_login_requested",
+  //       );
+  //       if (autoLoginRequested === "true") {
+  //         // Clear the flag
+  //         await AsyncStorage.removeItem("@pnp_auto_login_requested");
 
-          // Check if Supabase is configured
-          if (isSupabaseConfigured()) {
-            // Try to get current Supabase session
-            const {
-              data: { user },
-              error,
-            } = await supabase.auth.getUser();
+  //         // Check if Supabase is configured
+  //         if (isSupabaseConfigured()) {
+  //           // Try to get current Supabase session
+  //           const {
+  //             data: { user },
+  //             error,
+  //           } = await supabase.auth.getUser();
 
-            if (!error && user) {
-              // Valid session found, fetch personnel profile
-              const { data: remoteProfile, error: profileErr } = await supabase
-                .from("personnel")
-                .select("*")
-                .eq("id", user.id)
-                .single();
+  //           if (!error && user) {
+  //             // Valid session found, fetch personnel profile
+  //             const { data: remoteProfile, error: profileErr } = await supabase
+  //               .from("personnel")
+  //               .select("*")
+  //               .eq("id", user.id)
+  //               .single();
 
-              if (!profileErr && remoteProfile) {
-                // Create personnel object
-                const pUser: Personnel = {
-                  id: remoteProfile.id,
-                  badgeNumber: remoteProfile.badge_number,
-                  rank: remoteProfile.rank,
-                  rankId: remoteProfile.rank_id,
-                  fullname: remoteProfile.fullname,
-                  unitId: remoteProfile.unit_id,
-                  designation: remoteProfile.designation,
-                  isApproved: remoteProfile.is_approved,
-                  role: remoteProfile.role,
-                  email: user.email,
-                  photo_url: remoteProfile.photo_url, // Add photo URL from database
-                  expo_push_token: remoteProfile.expo_push_token,
-                };
+  //             if (!profileErr && remoteProfile) {
+  //               // Create personnel object
+  //               const pUser: Personnel = {
+  //                 id: remoteProfile.id,
+  //                 badgeNumber: remoteProfile.badge_number,
+  //                 rank: remoteProfile.rank,
+  //                 rankId: remoteProfile.rank_id,
+  //                 fullname: remoteProfile.fullname,
+  //                 unitId: remoteProfile.unit_id,
+  //                 designation: remoteProfile.designation,
+  //                 isApproved: remoteProfile.is_approved,
+  //                 role: remoteProfile.role,
+  //                 email: user.email,
+  //                 photo_url: remoteProfile.photo_url, // Add photo URL from database
+  //                 expo_push_token: remoteProfile.expo_push_token,
+  //               };
 
-                // Set personnel state
-                setPersonnel(pUser);
+  //               // Set personnel state
+  //               setPersonnel(pUser);
 
-                // Load associated schedule, logs, and stats
-                const assignedSched = await getScheduleByPersonnel(pUser.id);
-                if (assignedSched) {
-                  setSchedule(assignedSched);
-                }
+  //               // Load associated schedule, logs, and stats
+  //               const assignedSched = await getScheduleByPersonnel(pUser.id);
+  //               if (assignedSched) {
+  //                 setSchedule(assignedSched);
+  //               }
 
-                loadLogsAndStats();
-                updateUnsyncedCounter();
-                setIsShiftActive(true);
+  //               loadLogsAndStats();
+  //               updateUnsyncedCounter();
+  //               setIsShiftActive(true);
 
-                console.log(
-                  "[Auto-login] Successfully restored session for user:",
-                  user.email,
-                );
-              }
-            }
-          }
-        } else {
-          // THIRD: Check for active patrol session (app reopened during patrol)
-          const activePersonnelId = await AsyncStorage.getItem(
-            "@pnp_active_personnel_id",
-          );
-          const shiftStatus = await AsyncStorage.getItem("@pnp_shift_status");
+  //               console.log(
+  //                 "[Auto-login] Successfully restored session for user:",
+  //                 user.email,
+  //               );
+  //             }
+  //           }
+  //         }
+  //       } else {
+  //         // THIRD: Check for active patrol session (app reopened during patrol)
+  //         const activePersonnelId = await AsyncStorage.getItem(
+  //           "@pnp_active_personnel_id",
+  //         );
+  //         const shiftStatus = await AsyncStorage.getItem("@pnp_shift_status");
 
-          if (
-            activePersonnelId &&
-            shiftStatus === "ACTIVE" &&
-            isSupabaseConfigured()
-          ) {
-            // Try to get current Supabase session
-            const {
-              data: { user },
-              error,
-            } = await supabase.auth.getUser();
+  //         if (
+  //           activePersonnelId &&
+  //           shiftStatus === "ACTIVE" &&
+  //           isSupabaseConfigured()
+  //         ) {
+  //           // Try to get current Supabase session
+  //           const {
+  //             data: { user },
+  //             error,
+  //           } = await supabase.auth.getUser();
 
-            if (!error && user) {
-              // Valid session found, fetch personnel profile
-              const { data: remoteProfile, error: profileErr } = await supabase
-                .from("personnel")
-                .select("*")
-                .eq("id", user.id)
-                .single();
+  //           if (!error && user) {
+  //             // Valid session found, fetch personnel profile
+  //             const { data: remoteProfile, error: profileErr } = await supabase
+  //               .from("personnel")
+  //               .select("*")
+  //               .eq("id", user.id)
+  //               .single();
 
-              if (!profileErr && remoteProfile) {
-                // Create personnel object
-                const pUser: Personnel = {
-                  id: remoteProfile.id,
-                  badgeNumber: remoteProfile.badge_number,
-                  rank: remoteProfile.rank,
-                  rankId: remoteProfile.rank_id,
-                  fullname: remoteProfile.fullname,
-                  unitId: remoteProfile.unit_id,
-                  designation: remoteProfile.designation,
-                  isApproved: remoteProfile.is_approved,
-                  role: remoteProfile.role,
-                  email: user.email,
-                  photo_url: remoteProfile.photo_url, // Add photo URL from database
-                  expo_push_token: remoteProfile.expo_push_token,
-                };
+  //             if (!profileErr && remoteProfile) {
+  //               // Create personnel object
+  //               const pUser: Personnel = {
+  //                 id: remoteProfile.id,
+  //                 badgeNumber: remoteProfile.badge_number,
+  //                 rank: remoteProfile.rank,
+  //                 rankId: remoteProfile.rank_id,
+  //                 fullname: remoteProfile.fullname,
+  //                 unitId: remoteProfile.unit_id,
+  //                 designation: remoteProfile.designation,
+  //                 isApproved: remoteProfile.is_approved,
+  //                 role: remoteProfile.role,
+  //                 email: user.email,
+  //                 photo_url: remoteProfile.photo_url, // Add photo URL from database
+  //                 expo_push_token: remoteProfile.expo_push_token,
+  //               };
 
-                // Set personnel state
-                setPersonnel(pUser);
+  //               // Set personnel state
+  //               setPersonnel(pUser);
 
-                // Load associated schedule, logs, and stats
-                const assignedSched = await getScheduleByPersonnel(pUser.id);
-                if (assignedSched) {
-                  setSchedule(assignedSched);
-                }
+  //               // Load associated schedule, logs, and stats
+  //               const assignedSched = await getScheduleByPersonnel(pUser.id);
+  //               if (assignedSched) {
+  //                 setSchedule(assignedSched);
+  //               }
 
-                loadLogsAndStats();
-                updateUnsyncedCounter();
-                setIsShiftActive(true);
+  //               loadLogsAndStats();
+  //               updateUnsyncedCounter();
+  //               setIsShiftActive(true);
 
-                console.log(
-                  "[Auto-resume] Successfully resumed patrol session for user:",
-                  user.email,
-                );
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("[Auto-login/resume] Failed to restore session:", err);
-      }
-    };
+  //               console.log(
+  //                 "[Auto-resume] Successfully resumed patrol session for user:",
+  //                 user.email,
+  //               );
+  //             }
+  //           }
+  //         }
+  //       }
+  //     } catch (err) {
+  //       console.warn("[Auto-login/resume] Failed to restore session:", err);
+  //     }
+  //   };
 
-    checkAutoLoginAndResume();
-  }, [personnel]);
+  //   // checkAutoLoginAndResume();
+  // }, [personnel]);
 
   const toggleAutoSync = async () => {
     try {
@@ -488,36 +531,27 @@ export const usePatrolState = () => {
   }, [personnel]);
 
   const enable2FA = async (
-    secret: string,
+    user_id: string,
     code: string,
     factorId?: string,
   ): Promise<boolean> => {
     // Use ref to get current personnel to avoid stale closure issues
-    console.log("personnel: ", personnel);
-    if (!personnel) return false;
+    // console.log("personnel: ", personnel);
+    if (!user_id) return false;
     try {
-      // Use personnel.id as the key for AsyncStorage to ensure consistency
-      const personnelIdKey = personnel.id;
-
-      // Determine the active factorId (e.g., from AsyncStorage fallback or passed directly)
       let activeFactorId = factorId;
       console.log("activeFactorId: ", activeFactorId);
       if (!activeFactorId) {
         activeFactorId =
           (await AsyncStorage.getItem(
-            `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
+            `@pnp_supabase_mfa_factor_id_${user_id}`,
           )) || "";
         if (!activeFactorId) {
           throw new Error("No MFA factor ID found. Please enroll MFA first.");
         }
       }
 
-      const verified = await verifyMFAEnrollment(
-        personnel.email || personnel.badgeNumber,
-        activeFactorId,
-        code,
-        secret,
-      );
+      const verified = await verifyMFAChallenge(activeFactorId, code);
 
       if (!verified) {
         Alert.alert(
@@ -528,7 +562,7 @@ export const usePatrolState = () => {
       }
 
       await AsyncStorage.setItem(
-        `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
+        `@pnp_supabase_mfa_factor_id_${user_id}`,
         activeFactorId,
       );
       setIs2FAEnabled(true);
@@ -639,181 +673,256 @@ export const usePatrolState = () => {
     }
   };
 
+  const buildPersonnel = (remoteProfile: any, email: string): Personnel => ({
+    id: remoteProfile.id,
+    badgeNumber: remoteProfile.badge_number,
+    rank: remoteProfile.rank,
+    rankId: remoteProfile.rank_id,
+    fullname: remoteProfile.fullname,
+    unitId: remoteProfile.unit_id,
+    designation: remoteProfile.designation,
+    isApproved: remoteProfile.is_approved,
+    role: remoteProfile.role,
+    email,
+    photo_url: remoteProfile.photo_url,
+    expo_push_token: remoteProfile.expo_push_token,
+  });
+
+  const completeLogin = async (pUser: Personnel, projectId: string) => {
+    // Save state
+    setPersonnel(pUser);
+
+    // Load schedule
+    const assignedSched = await getScheduleByPersonnel(pUser.id);
+
+    if (assignedSched) {
+      setSchedule(assignedSched);
+    }
+
+    // Refresh dashboard
+    await loadLogsAndStats();
+    await updateUnsyncedCounter();
+
+    // Update Expo push token
+    try {
+      const token = (
+        await Notifications.getExpoPushTokenAsync({
+          projectId,
+        })
+      ).data;
+
+      await supabase
+        .from("personnel")
+        .update({
+          expo_push_token: token,
+        })
+        .eq("id", pUser.id);
+    } catch (err) {
+      console.warn("Unable to update Expo push token", err);
+    }
+  };
+
   const login = async (
     emailInput: string,
     passwordInput: string,
     otpCode?: string,
-  ): Promise<
-    boolean | "NEED_2FA" | "PENDING_APPROVAL" | "NOT_FOUND" | (string & {})
-  > => {
-    const trimmedEmail = emailInput.trim();
+  ): Promise<LoginResult> => {
+    const trimmedEmail = emailInput.trim().toLowerCase();
+
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
-      return "Please enter a valid email address.";
-    }
-    if (!passwordInput || passwordInput.trim().length === 0) {
-      return "Please enter your password.";
+      return {
+        status: "ERROR",
+        message: "Please enter a valid email address.",
+      };
     }
 
-    // Check if Supabase is configured
+    if (!passwordInput.trim()) {
+      return {
+        status: "ERROR",
+        message: "Please enter your password.",
+      };
+    }
+
     if (!isSupabaseConfigured()) {
-      return "Supabase is not configured. Please set up Supabase environment variables.";
+      return {
+        status: "ERROR",
+        message:
+          "Supabase is not configured. Please configure your environment variables.",
+      };
     }
 
     try {
-      let pUser: Personnel | null = null;
+      // ------------------------------------------------------------------
+      // STEP 1
+      // Authenticate with Supabase
+      // ------------------------------------------------------------------
 
-      // Sign in with Supabase
       const { data, error } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password: passwordInput,
       });
 
       if (error) {
-        return error.message || "Invalid email or password.";
+        return {
+          status: "ERROR",
+          message: error.message,
+        };
       }
 
-      if (data && data.user) {
-        const authUser = data.user;
+      if (!data.user) {
+        return {
+          status: "ERROR",
+          message: "Authentication failed.",
+        };
+      }
 
-        // Query public.personnel table
-        const { data: remoteProfile, error: profileErr } = await supabase
-          .from("personnel")
-          .select("*, rank(*), unit(*)")
-          .eq("id", authUser.id)
-          .maybeSingle();
+      const authUser = data.user;
 
-        if (profileErr) throw profileErr;
+      // ------------------------------------------------------------------
+      // STEP 2
+      // Retrieve personnel profile
+      // ------------------------------------------------------------------
 
-        const projectId =
-          Constants.expoConfig?.extra?.eas?.projectId ??
-          Constants.easConfig?.projectId;
+      const { data: remoteProfile, error: profileErr } = await supabase
+        .from("personnel")
+        .select("*, rank(*), unit(*)")
+        .eq("id", authUser.id)
+        .maybeSingle();
 
-        if (!projectId) {
-          throw new Error("EAS Project ID not found in app.json config.");
-        }
+      if (profileErr) throw profileErr;
 
-        const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
-          .data;
+      if (!remoteProfile) {
+        return {
+          status: "NOT_FOUND",
+        };
+      }
 
-        await supabase
-          .from("personnel")
-          .update({ expo_push_token: token })
-          .eq("id", authUser.id);
+      const pUser = buildPersonnel(
+        remoteProfile,
+        authUser.email ?? trimmedEmail,
+      );
 
-        const scheduleData = await getScheduleByPersonnel(authUser.id);
+      // ------------------------------------------------------------------
+      // STEP 3
+      // Check approval BEFORE MFA
+      // ------------------------------------------------------------------
 
-        setSchedule(scheduleData);
+      if (!pUser.isApproved) {
+        return {
+          status: "PENDING_APPROVAL",
+        };
+      }
 
-        if (remoteProfile) {
-          pUser = {
-            id: remoteProfile.id,
-            badgeNumber: remoteProfile.badge_number,
-            rank: remoteProfile.rank,
-            rankId: remoteProfile.rank_id,
-            fullname: remoteProfile.fullname,
-            unitId: remoteProfile.unit_id,
-            designation: remoteProfile.designation,
-            isApproved: remoteProfile.is_approved,
-            role: remoteProfile.role,
-            email: authUser.email,
-            photo_url: remoteProfile.photo_url, // Add photo URL from database
-            expo_push_token: remoteProfile.expo_push_token,
+      // ------------------------------------------------------------------
+      // STEP 4
+      // Determine project id
+      // ------------------------------------------------------------------
+
+      const projectId =
+        Constants.expoConfig?.extra?.eas?.projectId ??
+        Constants.easConfig?.projectId;
+
+      if (!projectId) {
+        throw new Error("EAS Project ID not found.");
+      }
+
+      // ------------------------------------------------------------------
+      // STEP 5
+      // MFA STATUS
+      // ------------------------------------------------------------------
+
+      const status = await checkMFAStatus(trimmedEmail);
+
+      console.log("MFA Status:", status);
+
+      // ------------------------------------------------------------------
+      // STEP 6
+      // User has no verified MFA
+      // ------------------------------------------------------------------
+
+      if (!status.isEnabled) {
+        const enrollment = await enrollMFA(trimmedEmail);
+
+        // Save pending personnel so LoginView can finish enrollment
+        await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
+
+        await AsyncStorage.setItem(
+          PENDING_MFA_PERSONNEL_KEY,
+          JSON.stringify(pUser),
+        );
+
+        await AsyncStorage.setItem(
+          `@pnp_supabase_mfa_factor_id_${pUser.id}`,
+          enrollment.factorId,
+        );
+
+        if (enrollment.pendingEnrollment) {
+          return {
+            status: "NEED_MFA_VERIFICATION",
+            factorId: enrollment.factorId,
           };
-        } else {
-          // If personnel record doesn't exist, return NOT_FOUND (no dynamic profile creation)
-          return "NOT_FOUND";
         }
 
-        setPersonnel(pUser);
-
-        // CHECK SUPABASE MULTI-FACTOR AUTHENTICATION (MFA) - FORCED COMPULSORY
-        // Bypass MFA in development if DISABLE_MFA is set to 'true'
-        if (process.env.EXPO_PUBLIC_DISABLE_MFA === "true") {
-          // MFA bypassed for development
-        } else {
-          try {
-            const userEmail = pUser?.email || trimmedEmail.toLowerCase();
-            let status = await checkMFAStatus(userEmail);
-            console.log("Status: ", status);
-            if (!status.isEnabled) {
-              // Force-seed status enrollment to guarantee high-grade secure PNP compliance on first login
-              const enrollment = await enrollMFA(userEmail);
-              // Store the factorId for later verification during login using personnel.id as key
-              const personnelIdKey = pUser.id;
-              await AsyncStorage.setItem(
-                `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
-                enrollment.id,
-              );
-
-              // Store pending MFA data so we can restore personnel state after MFA verification
-              await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
-              await AsyncStorage.setItem(
-                PENDING_MFA_PERSONNEL_KEY,
-                JSON.stringify(pUser),
-              );
-
-              // Return the secret so the client can show QR code for setup
-              return `NEED_MFA_SETUP:${enrollment.secret}`;
-            }
-
-            if (status.isEnabled) {
-              if (!otpCode) {
-                const secret = status.secret ?? "SUPABASE_MFA";
-                return `NEED_2FA_SECRET:${secret}`;
-              }
-              // Verify code
-              const verified = await verifyMFAEnrollment(
-                userEmail,
-                status.factorId || "",
-                otpCode,
-                status.secret,
-              );
-              if (!verified) {
-                return "Invalid MFA Token. The Supabase MFA 6-digit verification code is invalid, expired, or has already been used.";
-              }
-            }
-          } catch (mfaErr) {
-            console.warn("Supabase MFA login checking err", mfaErr);
-            // If MFA check fails, we should not allow login since MFA is compulsory
-            return "Multi-factor authentication setup failed. Please try again.";
-          }
+        if (enrollment.alreadyVerified) {
+          return {
+            status: "NEED_MFA_LOGIN",
+            factorId: enrollment.factorId,
+          };
         }
 
-        if (!pUser) {
-          return "NOT_FOUND";
-        }
-
-        if (!pUser.isApproved) {
-          return "PENDING_APPROVAL";
-        }
-
-        if (pUser) {
-          pUser.email = trimmedEmail.toLowerCase();
-        }
-
-        // ⚠️ FIX: Changed from personnel (old null state) to pUser (new user state)
-        setPersonnel(pUser);
-
-        // Vehicle functionality removed - using personnel only
-        const assignedSched = await getScheduleByPersonnel(pUser.id);
-        if (assignedSched) {
-          setSchedule(assignedSched);
-        }
-
-        return true;
+        return {
+          status: "NEED_MFA_SETUP",
+          factorId: enrollment.factorId,
+          secret: enrollment.secret!,
+        };
       }
 
-      // ⚠️ FIX: Fallback handle if data/user object returned by Supabase is empty
-      return "Authentication session creation failed. Empty user profile payload.";
+      // ------------------------------------------------------------------
+      // STEP 7
+      // User already has MFA
+      // ------------------------------------------------------------------
+
+      if (!otpCode) {
+        return {
+          status: "NEED_MFA_LOGIN",
+          factorId: status.factorId!,
+        };
+      }
+
+      const verified = await verifyMFAChallenge(status.factorId!, otpCode);
+
+      if (!verified) {
+        return {
+          status: "ERROR",
+          message: "Invalid or expired MFA verification code.",
+        };
+      }
+
+      // ------------------------------------------------------------------
+      // STEP 8
+      // MFA SUCCESS
+      // ------------------------------------------------------------------
+
+      await completeLogin(pUser, projectId);
+
+      return {
+        status: "SUCCESS",
+      };
     } catch (e: any) {
       console.error(e);
-      return e.message || "Identity link handshake failed.";
+
+      return {
+        status: "ERROR",
+        message: e.message ?? "Authentication failed.",
+      };
     }
   };
 
   const logout = useCallback(async () => {
     try {
       await stopBackgroundUpdates();
+      await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+      await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
     } catch {
       // Ignored for clean sign out
     }
@@ -1071,13 +1180,13 @@ export const usePatrolState = () => {
                 await loadLogsAndStats();
 
                 // NEW: Send SOS alert to unit members
-                await sendUnitSosAlert(personnel, {
-                  latitude: lat,
-                  longitude: lng,
-                  accuracy: accuracy,
-                  timestamp: new Date().toISOString(),
-                  sosId: uniqueId,
-                });
+                // await sendUnitSosAlert(personnel, {
+                //   latitude: lat,
+                //   longitude: lng,
+                //   accuracy: accuracy,
+                //   timestamp: new Date().toISOString(),
+                //   sosId: uniqueId,
+                // });
 
                 Alert.alert(
                   "DISTRESS SIGNAL SENT",
@@ -1286,26 +1395,6 @@ export const usePatrolState = () => {
         throw authError;
       }
 
-      // 3. Update the existing candidate record with the new registration details
-      // const success = await registerPersonnel(
-      //   candidate.id,
-      //   registrationData.email,
-      //   registrationData.password || "",
-      //   // registrationData.fullname,
-      //   // registrationData.phone_number,
-      //   // registrationData.viber_number,
-      //   // undefined, // photoUrl will be handled after photo upload
-      //   // registrationData.expo_push_token,
-      // );
-
-      // if (!success) {
-      //   return {
-      //     success: false,
-      //     message:
-      //       "Your personnel information already registered. Registration denied.",
-      //   };
-      // }
-
       // 4. If photo URI is provided, upload the photo to Supabase storage
       if (registrationData.photoUri) {
         try {
@@ -1417,6 +1506,7 @@ export const usePatrolState = () => {
     disable2FA,
     requestForegroundPermission,
     requestBackgroundPermission,
+    requestNotificationPermissions,
     enableGpsInline,
     registerUser,
     refreshPersonnel,

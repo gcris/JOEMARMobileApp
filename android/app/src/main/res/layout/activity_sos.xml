@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:id="@+id/txtOfficer"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:text="Officer"/>
+
+    <TextView
+        android:id="@+id/txtPhone"
+        android:text="Phone"/>
+
+    <Button
+        android:id="@+id/btnDirection"
+        android:text="GET DIRECTION"/>
+
+    <Button
+        android:id="@+id/btnClose"
+        android:text="CLOSE"/>
+
+</LinearLayout>

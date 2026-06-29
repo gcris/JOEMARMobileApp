@@ -27,18 +27,33 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": [
+        "POST_NOTIFICATIONS",
+        "WAKE_LOCK",
         "ACCESS_BACKGROUND_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
-        "SYSTEM_ALERT_WINDOW",
         "VIBRATE",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION"
+      ],
+      "queries": [
+        {
+          "intent": {
+            "action": "android.intent.action.DIAL",
+            "data": { "scheme": "tel" }
+          }
+        },
+        {
+          "intent": {
+            "action": "android.intent.action.VIEW",
+            "data": { "scheme": "viber" }
+          }
+        }
       ]
     },
     "plugins": [

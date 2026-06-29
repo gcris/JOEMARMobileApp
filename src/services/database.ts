@@ -1,4 +1,4 @@
-import { supabase, supabaseAdmin, isSupabaseConfigured } from "./supabase";
+import { supabase, isSupabaseConfigured } from "./supabase";
 import { Personnel, Schedule, PersonnelLog } from "../types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 

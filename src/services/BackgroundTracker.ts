@@ -17,12 +17,6 @@ Notifications.setNotificationHandler({
 // 2. 🚨 CRITICAL ANDROID FIX: Synchronize Category Registration at Startup
 export async function registerNotificationLayouts() {
   try {
-    Notifications.addNotificationReceivedListener((notification) => {
-      console.log(
-        "Received notification:",
-        JSON.stringify(notification.request.content, null, 2),
-      );
-    });
     // Register action category layouts for incoming SOS signals
     await Notifications.setNotificationCategoryAsync("sos-actions", [
       {
@@ -70,18 +64,38 @@ Notifications.addNotificationResponseReceivedListener(async (response) => {
   const { notification, actionIdentifier } = response;
   const data = notification.request.content?.data;
 
+  console.log(
+    "Received notification:",
+    JSON.stringify(notification.request.content, null, 2),
+  );
+
   if (!data) return;
 
   // ─── CASE 1: INCOMING SOS ALERTS FROM TEAMMATES ───
   if (data.type === "sos-incoming-alert") {
-    const { latitude, longitude } = data;
+    const { latitude, longitude, senderName, phone_number } = data;
+
+    // Store the SOS data in AsyncStorage for the App to display in modal
+    try {
+      await AsyncStorage.setItem(
+        "@pnp_sos_alert_data",
+        JSON.stringify({
+          latitude,
+          longitude,
+          senderName: senderName,
+          phone_number: phone_number,
+        }),
+      );
+    } catch (e) {
+      console.warn("Failed to store SOS alert data in AsyncStorage:", e);
+    }
 
     // Handle Button Choices
     if (actionIdentifier === "get-directions-action") {
       const mapUrl =
         Platform.OS === "ios"
-          ? `maps://app?daddr=${latitude},${longitude}`
-          : `geo:${latitude},${longitude}?q=${latitude},${longitude}(Officer+In+Distress)`;
+          ? `https://maps.apple.com/?daddr=${latitude},${longitude}`
+          : `google.navigation:q=${latitude},${longitude}`;
 
       Linking.openURL(mapUrl).catch((err) => console.error(err));
     }
@@ -91,18 +105,18 @@ Notifications.addNotificationResponseReceivedListener(async (response) => {
     }
   }
 
-  // ─── CASE 2: ACTIVE PATROL NOTIFICATION TAP (AUTO-LOGIN REQUEST) ───
-  if (data.type === "patrol-notification-tap" && data.shouldAutoLogin) {
-    try {
-      await AsyncStorage.setItem("@pnp_auto_login_requested", "true");
-      await AsyncStorage.setItem(
-        "@pnp_sos_notification_data",
-        JSON.stringify(data),
-      );
-    } catch (e) {
-      console.warn("Failed to store notification metadata in AsyncStorage:", e);
-    }
-  }
+  // // ─── CASE 2: ACTIVE PATROL NOTIFICATION TAP (AUTO-LOGIN REQUEST) ───
+  // if (data.type === "patrol-notification-tap" && data.shouldAutoLogin) {
+  //   try {
+  //     console.log("ACTIVE PATROL NOTIFICATION TAP (AUTO-LOGIN REQUEST) ───");
+  //     await AsyncStorage.setItem(
+  //       "@pnp_sos_notification_data",
+  //       JSON.stringify(data),
+  //     );
+  //   } catch (e) {
+  //     console.warn("Failed to store notification metadata in AsyncStorage:", e);
+  //   }
+  // }
   // Note: "sos-button" is handled strictly in App.tsx now to prevent conflicts
 });
 
