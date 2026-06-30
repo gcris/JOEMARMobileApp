@@ -65,10 +65,18 @@ object SOSNotificationHelper {
         }
 
         val intent = Intent(context, SOSActivity::class.java).apply {
+            putExtra("title", title)
+            putExtra("body", body)
+
             putExtra("senderName", senderName)
-            putExtra("phoneNumber", phoneNumber)
+            putExtra("phone_number", phoneNumber)
+
             putExtra("latitude", latitude)
             putExtra("longitude", longitude)
+
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
         val pendingIntent = PendingIntent.getActivity(

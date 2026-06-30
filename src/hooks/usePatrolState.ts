@@ -4,8 +4,8 @@ import * as Location from "expo-location";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system";
-import { Audio } from "expo-av";
 import * as Notifications from "expo-notifications";
+import FCMModule from "../services/FCM";
 import { Personnel, Schedule, PersonnelLog } from "../types";
 import {
   getPersonnelByBadge,
@@ -306,191 +306,262 @@ export const usePatrolState = () => {
     if (!personnel) return;
   }, [personnel]);
 
-  // Check for auto-login request from notification tap AND active patrol session
-  // useEffect(() => {
-  //   const checkAutoLoginAndResume = async () => {
-  //     try {
-  //       // FIRST: Check if we have pending MFA data (user is in middle of MFA setup)
-  //       const pendingUserId = await AsyncStorage.getItem(
-  //         PENDING_MFA_USER_ID_KEY,
-  //       );
-  //       const pendingPersonnelJson = await AsyncStorage.getItem(
-  //         PENDING_MFA_PERSONNEL_KEY,
-  //       );
+  // Check for auto-login request from notification tap AND active patrol session - Only runs when isShiftActive changes (not on personnel changes)
+  useEffect(() => {
+    const checkAutoLoginAndResume = async () => {
+      try {
+        // FIRST: Check if we have pending MFA data (user is in middle of MFA setup)
+        const pendingUserId = await AsyncStorage.getItem(
+          PENDING_MFA_USER_ID_KEY,
+        );
+        const pendingPersonnelJson = await AsyncStorage.getItem(
+          PENDING_MFA_PERSONNEL_KEY,
+        );
 
-  //       if (pendingUserId && pendingPersonnelJson) {
-  //         try {
-  //           const pendingPersonnel = JSON.parse(pendingPersonnelJson);
-  //           // Validate that the pending personnel data is valid
-  //           if (pendingPersonnel && pendingPersonnel.id === pendingUserId) {
-  //             // Set personnel state from pending MFA data
-  //             setPersonnel(pendingPersonnel);
+        if (pendingUserId && pendingPersonnelJson) {
+          try {
+            const pendingPersonnel = JSON.parse(pendingPersonnelJson);
+            // Validate that the pending personnel data is valid
+            if (pendingPersonnel && pendingPersonnel.id === pendingUserId) {
+              // Set personnel state from pending MFA data
+              setPersonnel(pendingPersonnel);
 
-  //             // Load associated data
-  //             const assignedSched = await getScheduleByPersonnel(
-  //               pendingPersonnel.id,
-  //             );
-  //             if (assignedSched) {
-  //               setSchedule(assignedSched);
-  //             }
+              // Load associated data
+              const assignedSched = await getScheduleByPersonnel(
+                pendingPersonnel.id,
+              );
+              if (assignedSched) {
+                setSchedule(assignedSched);
+              }
 
-  //             loadLogsAndStats();
-  //             updateUnsyncedCounter();
+              loadLogsAndStats();
+              updateUnsyncedCounter();
 
-  //             console.log(
-  //               "[Auto-resume] Restored personnel state from pending MFA data for user:",
-  //               pendingUserId,
-  //             );
+              console.log(
+                "[Auto-resume] Restored personnel state from pending MFA data for user:",
+                pendingUserId,
+              );
 
-  //             // Clear the pending MFA data since we've restored it
-  //             await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-  //             await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+              // Clear the pending MFA data since we've restored it
+              await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+              await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
 
-  //             return; // Important: return early to avoid overwriting with other login attempts
-  //           }
-  //         } catch (parseError) {
-  //           console.warn(
-  //             "Failed to parse pending MFA personnel data:",
-  //             parseError,
-  //           );
-  //           // Clear invalid pending data
-  //           await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-  //           await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
-  //         }
-  //       }
+              return; // Important: return early to avoid overwriting with other login attempts
+            }
+          } catch (parseError) {
+            console.warn(
+              "Failed to parse pending MFA personnel data:",
+              parseError,
+            );
+            // Clear invalid pending data
+            await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
+            await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+          }
+        }
 
-  //       // SECOND: Check if auto-login was requested from notification tap
-  //       const autoLoginRequested = await AsyncStorage.getItem(
-  //         "@pnp_auto_login_requested",
-  //       );
-  //       if (autoLoginRequested === "true") {
-  //         // Clear the flag
-  //         await AsyncStorage.removeItem("@pnp_auto_login_requested");
+        // SECOND: Check if auto-login was requested from notification tap
+        const autoLoginRequested = await AsyncStorage.getItem(
+          "@pnp_auto_login_requested",
+        );
+        const activePersonnelId = await AsyncStorage.getItem(
+          "@pnp_active_personnel_id",
+        );
 
-  //         // Check if Supabase is configured
-  //         if (isSupabaseConfigured()) {
-  //           // Try to get current Supabase session
-  //           const {
-  //             data: { user },
-  //             error,
-  //           } = await supabase.auth.getUser();
+        console.log(
+          "autoLoginRequested, activePersonnelId",
+          autoLoginRequested,
+          activePersonnelId,
+        );
+        if (autoLoginRequested === "true" && activePersonnelId) {
+          // Clear the flag
+          await AsyncStorage.removeItem("@pnp_auto_login_requested");
+          setIsShiftActive(true);
 
-  //           if (!error && user) {
-  //             // Valid session found, fetch personnel profile
-  //             const { data: remoteProfile, error: profileErr } = await supabase
-  //               .from("personnel")
-  //               .select("*")
-  //               .eq("id", user.id)
-  //               .single();
+          // Check if Supabase is configured
+          if (isSupabaseConfigured()) {
+            // Try to get current Supabase session
+            const {
+              data: { user },
+              error,
+            } = await supabase.auth.admin.getUserById(activePersonnelId);
 
-  //             if (!profileErr && remoteProfile) {
-  //               // Create personnel object
-  //               const pUser: Personnel = {
-  //                 id: remoteProfile.id,
-  //                 badgeNumber: remoteProfile.badge_number,
-  //                 rank: remoteProfile.rank,
-  //                 rankId: remoteProfile.rank_id,
-  //                 fullname: remoteProfile.fullname,
-  //                 unitId: remoteProfile.unit_id,
-  //                 designation: remoteProfile.designation,
-  //                 isApproved: remoteProfile.is_approved,
-  //                 role: remoteProfile.role,
-  //                 email: user.email,
-  //                 photo_url: remoteProfile.photo_url, // Add photo URL from database
-  //                 expo_push_token: remoteProfile.expo_push_token,
-  //               };
+            if (!error && user) {
+              // Valid session found, fetch personnel profile
+              const { data: remoteProfile, error: profileErr } = await supabase
+                .from("personnel")
+                .select("*")
+                .eq("id", user.id)
+                .single();
 
-  //               // Set personnel state
-  //               setPersonnel(pUser);
+              if (!profileErr && remoteProfile) {
+                // Create personnel object
+                const pUser: Personnel = {
+                  id: remoteProfile.id,
+                  badgeNumber: remoteProfile.badge_number,
+                  rank: remoteProfile.rank,
+                  rankId: remoteProfile.rank_id,
+                  fullname: remoteProfile.fullname,
+                  unitId: remoteProfile.unit_id,
+                  designation: remoteProfile.designation,
+                  isApproved: remoteProfile.is_approved,
+                  role: remoteProfile.role,
+                  email: user.email,
+                  photo_url: remoteProfile.photo_url, // Add photo URL from database
+                  expo_push_token: remoteProfile.expo_push_token,
+                  fcm_token: remoteProfile.fcm_token,
+                };
 
-  //               // Load associated schedule, logs, and stats
-  //               const assignedSched = await getScheduleByPersonnel(pUser.id);
-  //               if (assignedSched) {
-  //                 setSchedule(assignedSched);
-  //               }
+                // Set personnel state
+                setPersonnel(pUser);
 
-  //               loadLogsAndStats();
-  //               updateUnsyncedCounter();
-  //               setIsShiftActive(true);
+                // Load associated schedule, logs, and stats
+                const assignedSched = await getScheduleByPersonnel(pUser.id);
+                if (assignedSched) {
+                  setSchedule(assignedSched);
+                }
 
-  //               console.log(
-  //                 "[Auto-login] Successfully restored session for user:",
-  //                 user.email,
-  //               );
-  //             }
-  //           }
-  //         }
-  //       } else {
-  //         // THIRD: Check for active patrol session (app reopened during patrol)
-  //         const activePersonnelId = await AsyncStorage.getItem(
-  //           "@pnp_active_personnel_id",
-  //         );
-  //         const shiftStatus = await AsyncStorage.getItem("@pnp_shift_status");
+                loadLogsAndStats();
+                updateUnsyncedCounter();
+                setIsShiftActive(true);
 
-  //         if (
-  //           activePersonnelId &&
-  //           shiftStatus === "ACTIVE" &&
-  //           isSupabaseConfigured()
-  //         ) {
-  //           // Try to get current Supabase session
-  //           const {
-  //             data: { user },
-  //             error,
-  //           } = await supabase.auth.getUser();
+                console.log(
+                  "[Auto-login] Successfully restored session for user:",
+                  user.email,
+                );
+              }
+            }
+          }
+        } else {
+          // THIRD: Check for active patrol session (app reopened during patrol)
+          // Only check for auto-resume if patrol is currently active
+          if (isShiftActive) {
+            const activePersonnelId = await AsyncStorage.getItem(
+              "@pnp_active_personnel_id",
+            );
+            const shiftStatus = await AsyncStorage.getItem("@pnp_shift_status");
 
-  //           if (!error && user) {
-  //             // Valid session found, fetch personnel profile
-  //             const { data: remoteProfile, error: profileErr } = await supabase
-  //               .from("personnel")
-  //               .select("*")
-  //               .eq("id", user.id)
-  //               .single();
+            if (
+              activePersonnelId &&
+              shiftStatus === "ACTIVE" &&
+              isSupabaseConfigured()
+            ) {
+              // Try to get current Supabase session
+              const {
+                data: { user },
+                error,
+              } = await supabase.auth.getUser();
 
-  //             if (!profileErr && remoteProfile) {
-  //               // Create personnel object
-  //               const pUser: Personnel = {
-  //                 id: remoteProfile.id,
-  //                 badgeNumber: remoteProfile.badge_number,
-  //                 rank: remoteProfile.rank,
-  //                 rankId: remoteProfile.rank_id,
-  //                 fullname: remoteProfile.fullname,
-  //                 unitId: remoteProfile.unit_id,
-  //                 designation: remoteProfile.designation,
-  //                 isApproved: remoteProfile.is_approved,
-  //                 role: remoteProfile.role,
-  //                 email: user.email,
-  //                 photo_url: remoteProfile.photo_url, // Add photo URL from database
-  //                 expo_push_token: remoteProfile.expo_push_token,
-  //               };
+              if (!error && user) {
+                // Valid session found, fetch personnel profile
+                const { data: remoteProfile, error: profileErr } =
+                  await supabase
+                    .from("personnel")
+                    .select("*")
+                    .eq("id", user.id)
+                    .single();
 
-  //               // Set personnel state
-  //               setPersonnel(pUser);
+                if (!profileErr && remoteProfile) {
+                  // Create personnel object
+                  const pUser: Personnel = {
+                    id: remoteProfile.id,
+                    badgeNumber: remoteProfile.badge_number,
+                    rank: remoteProfile.rank,
+                    rankId: remoteProfile.rank_id,
+                    fullname: remoteProfile.fullname,
+                    unitId: remoteProfile.unit_id,
+                    designation: remoteProfile.designation,
+                    isApproved: remoteProfile.is_approved,
+                    role: remoteProfile.role,
+                    email: user.email,
+                    photo_url: remoteProfile.photo_url, // Add photo URL from database
+                    expo_push_token: remoteProfile.expo_push_token,
+                    fcm_token: remoteProfile.fcm_token,
+                  };
 
-  //               // Load associated schedule, logs, and stats
-  //               const assignedSched = await getScheduleByPersonnel(pUser.id);
-  //               if (assignedSched) {
-  //                 setSchedule(assignedSched);
-  //               }
+                  // Set personnel state
+                  setPersonnel(pUser);
 
-  //               loadLogsAndStats();
-  //               updateUnsyncedCounter();
-  //               setIsShiftActive(true);
+                  // Load associated schedule, logs, and stats
+                  const assignedSched = await getScheduleByPersonnel(pUser.id);
+                  if (assignedSched) {
+                    setSchedule(assignedSched);
+                  }
 
-  //               console.log(
-  //                 "[Auto-resume] Successfully resumed patrol session for user:",
-  //                 user.email,
-  //               );
-  //             }
-  //           }
-  //         }
-  //       }
-  //     } catch (err) {
-  //       console.warn("[Auto-login/resume] Failed to restore session:", err);
-  //     }
-  //   };
+                  loadLogsAndStats();
+                  updateUnsyncedCounter();
+                  setIsShiftActive(true);
 
-  //   // checkAutoLoginAndResume();
-  // }, [personnel]);
+                  console.log(
+                    "[Auto-resume] Successfully resumed patrol session for user:",
+                    user.email,
+                  );
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[Auto-login/resume] Failed to restore session:", err);
+      }
+    };
+
+    // Only run auto-login/resume check if shift is active
+    if (isShiftActive) {
+      checkAutoLoginAndResume();
+    }
+  }, [isShiftActive]); // Only depend on isShiftActive, not personnel
+
+  // Restore session from storage on app mount
+  useEffect(() => {
+    const restoreSessionFromStorage = async () => {
+      try {
+        const status = await AsyncStorage.getItem("@pnp_shift_status");
+        if (status === "ACTIVE") {
+          const personnelId = await AsyncStorage.getItem(
+            "@pnp_active_personnel_id",
+          );
+          if (personnelId) {
+            // Fetch personnel from Supabase
+            const { data: remoteProfile, error: profileErr } = await supabase
+              .from("personnel")
+              .select("*, rank(*), unit(*)")
+              .eq("id", personnelId)
+              .single();
+            if (!profileErr && remoteProfile) {
+              // Get current Supabase user for email
+              const {
+                data: { user },
+                error: authError,
+              } = await supabase.auth.getUser();
+              if (!authError && user) {
+                const pUser = buildPersonnel(remoteProfile, user.email ?? "");
+                setPersonnel(pUser);
+                // Load associated data
+                const assignedSched = await getScheduleByPersonnel(pUser.id);
+                if (assignedSched) {
+                  setSchedule(assignedSched);
+                }
+                await loadLogsAndStats();
+                await updateUnsyncedCounter();
+                setIsShiftActive(true);
+                console.log(
+                  "[RestoreSession] Restored active session for user:",
+                  pUser.email,
+                );
+                return;
+              }
+            }
+          }
+        }
+        // If not active, ensure shift is false
+        setIsShiftActive(false);
+      } catch (err) {
+        console.warn("[RestoreSession] Failed to restore session:", err);
+        setIsShiftActive(false);
+      }
+    };
+    restoreSessionFromStorage();
+  }, []); // Run once on mount
 
   const toggleAutoSync = async () => {
     try {
@@ -686,6 +757,7 @@ export const usePatrolState = () => {
     email,
     photo_url: remoteProfile.photo_url,
     expo_push_token: remoteProfile.expo_push_token,
+    fcm_token: remoteProfile.fcm_token,
   });
 
   const completeLogin = async (pUser: Personnel, projectId: string) => {
@@ -705,16 +777,19 @@ export const usePatrolState = () => {
 
     // Update Expo push token
     try {
-      const token = (
-        await Notifications.getExpoPushTokenAsync({
-          projectId,
-        })
-      ).data;
+      // const token = (
+      //   await Notifications.getExpoPushTokenAsync({
+      //     projectId,
+      //   })
+      // ).data;
+
+      const token = await FCMModule.getToken();
 
       await supabase
         .from("personnel")
         .update({
-          expo_push_token: token,
+          // expo_push_token: token,
+          fcm_token: token,
         })
         .eq("id", pUser.id);
     } catch (err) {
@@ -1326,7 +1401,11 @@ export const usePatrolState = () => {
    */
   const sendExpoPushNotification = useCallback(async (notification: any) => {
     try {
-      await fetch("https://exp.host/--/api/v2/push/send", {
+      const fcm_url =
+        "https://fcm.googleapis.com/v1/projects/inppo-patrol-log/messages:send";
+      const expo_url = "https://exp.host/--/api/v2/push/send";
+
+      await fetch(fcm_url, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -1355,16 +1434,18 @@ export const usePatrolState = () => {
     expo_push_token?: string; // Expo push token for notifications
   }): Promise<{ success: boolean; message: string }> => {
     try {
-      const projectId =
-        Constants.expoConfig?.extra?.eas?.projectId ??
-        Constants.easConfig?.projectId;
+      // const projectId =
+      //   Constants.expoConfig?.extra?.eas?.projectId ??
+      //   Constants.easConfig?.projectId;
 
-      if (!projectId) {
-        throw new Error("EAS Project ID not found in app.json config.");
-      }
+      // if (!projectId) {
+      //   throw new Error("EAS Project ID not found in app.json config.");
+      // }
 
-      const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
-        .data;
+      // const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
+      //   .data;
+
+      const token = await FCMModule.getToken();
 
       // 1. Verify existence of the personnel via badge_number, rank_id, unit_id, and designation
       const candidate = await findCandidatePersonnel(
@@ -1429,7 +1510,7 @@ export const usePatrolState = () => {
           // Update personnel record with photo URL and expo_push_token
           const { error: dbError } = await supabase
             .from("personnel")
-            .update({ photo_url: photoUrl, expo_push_token: token })
+            .update({ photo_url: photoUrl, fcm_token: token })
             .eq("id", candidate.id);
 
           if (dbError) throw dbError;
@@ -1474,12 +1555,7 @@ export const usePatrolState = () => {
     } catch (error) {
       console.error("Failed to refresh personnel data:", error);
     }
-  }, [
-    personnel?.id,
-    getScheduleByPersonnel,
-    loadLogsAndStats,
-    updateUnsyncedCounter,
-  ]);
+  }, [personnel?.id, loadLogsAndStats, updateUnsyncedCounter]);
 
   return {
     personnel,
@@ -1500,6 +1576,8 @@ export const usePatrolState = () => {
     flushSyncedCache,
     openSystemSettings,
     triggerEmergencySOS,
+    sendUnitSosAlert,
+    sendExpoPushNotification,
     toggleAutoSync,
     is2FAEnabled,
     enable2FA,

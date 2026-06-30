@@ -5,31 +5,59 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
+import android.media.MediaPlayer
+import android.os.VibrationEffect
+import android.os.Vibrator
 
-import com.facebook.react.ReactActivity
+import androidx.appcompat.app.AppCompatActivity
 
-class SOSActivity : ReactActivity() {
-
-    override fun getMainComponentName(): String {
-        return "main"
-    }
+class SOSActivity : AppCompatActivity() {
+    private var mediaPlayer: MediaPlayer? = null
+    private lateinit var vibrator: Vibrator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.activity_sos)
+        vibrator = getSystemService(Vibrator::class.java)
 
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val effect = VibrationEffect.createWaveform(
+                longArrayOf(0, 1000, 500),
+                0
+            )
+            vibrator.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(longArrayOf(0, 1000, 500), 0)
+        }
+
+        mediaPlayer = MediaPlayer.create(this, R.raw.sos_alert)
+        mediaPlayer?.apply {
+            isLooping = true
+            start()
+        }
+
+        val title = intent.getStringExtra("title") ?: "DISTRESS SIGNAL"
+        val body = intent.getStringExtra("body") ?: ""
         val officer = intent.getStringExtra("senderName") ?: ""
         val phone = intent.getStringExtra("phone_number") ?: ""
 
         val latitude = intent.getDoubleExtra("latitude",0.0)
         val longitude = intent.getDoubleExtra("longitude",0.0)
 
+        findViewById<TextView>(R.id.txtTitle).text = title
+        findViewById<TextView>(R.id.txtBody).text = body
         findViewById<TextView>(R.id.txtOfficer).text = officer
         findViewById<TextView>(R.id.txtPhone).text = phone
 
         findViewById<Button>(R.id.btnDirection)
             .setOnClickListener {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+                mediaPlayer = null
+
+                vibrator.cancel();
 
                 val uri =
                     Uri.parse(
@@ -40,11 +68,54 @@ class SOSActivity : ReactActivity() {
                 intent.setPackage("com.google.android.apps.maps")
 
                 startActivity(intent)
+
+                finish()
+            }
+
+        findViewById<Button>(R.id.btnCall)
+            .setOnClickListener {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+                mediaPlayer = null
+
+                vibrator.cancel();
+
+                val intent = Intent(Intent.ACTION_DIAL).apply {
+                    data = Uri.parse("tel:$phone")
+                }
+
+                startActivity(intent)
+
+                finish()
             }
 
         findViewById<Button>(R.id.btnClose)
             .setOnClickListener {
+                mediaPlayer?.let {
+                    if (it.isPlaying) {
+                        it.stop()
+                    }
+                    it.release()
+                }
+                mediaPlayer = null
+
+                vibrator.cancel();
+
                 finish()
             }
+    }
+
+    override fun onDestroy() {
+        mediaPlayer?.let {
+            if (it.isPlaying) {
+                it.stop()
+            }
+            it.release()
+        }
+        mediaPlayer = null
+
+        vibrator.cancel();
+
+        super.onDestroy()
     }
 }

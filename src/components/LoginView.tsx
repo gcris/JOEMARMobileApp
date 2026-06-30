@@ -434,13 +434,10 @@ export const LoginView = ({
           setMfaFactorId("");
           setStep("credentials");
         } else if (loginResult.status === "ERROR") {
-          // Login failed - show error and reset to credentials
+          // Login failed - show error and stay on OTP step for retry
           setErrorMessage(loginResult.message);
-          setEmail("");
-          setPassword("");
           setOtp("");
-          setMfaFactorId("");
-          setStep("credentials");
+          // Keep current step as "otp" to allow retry
         } else {
           // Unexpected result
           Alert.alert("Error", "Unexpected login result");
@@ -2014,7 +2011,7 @@ export const LoginView = ({
               {loading ? (
                 <ActivityIndicator
                   color={isDarkTheme ? "#0B121F" : "#FFFFFF"}
-                />
+                ></ActivityIndicator>
               ) : (
                 <Text
                   style={{

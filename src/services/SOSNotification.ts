@@ -1,8 +1,8 @@
-import { NativeModules } from "react-native";
+import { NativeModules, Platform } from "react-native";
 
 const { SOSModule } = NativeModules;
 
-export interface SOSPayload {
+export interface SOSNotificationData {
   title: string;
   body: string;
   senderName: string;
@@ -11,8 +11,17 @@ export interface SOSPayload {
   longitude: number;
 }
 
-export default {
-  show(data: SOSPayload) {
+const SOSNotification = {
+  show(data: SOSNotificationData) {
+    if (Platform.OS !== "android") return;
+
+    if (!SOSModule) {
+      console.warn("SOSModule is not registered.");
+      return;
+    }
+
     SOSModule.showSOS(data);
   },
 };
+
+export default SOSNotification;

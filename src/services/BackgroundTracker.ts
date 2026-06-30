@@ -106,17 +106,17 @@ Notifications.addNotificationResponseReceivedListener(async (response) => {
   }
 
   // // ─── CASE 2: ACTIVE PATROL NOTIFICATION TAP (AUTO-LOGIN REQUEST) ───
-  // if (data.type === "patrol-notification-tap" && data.shouldAutoLogin) {
-  //   try {
-  //     console.log("ACTIVE PATROL NOTIFICATION TAP (AUTO-LOGIN REQUEST) ───");
-  //     await AsyncStorage.setItem(
-  //       "@pnp_sos_notification_data",
-  //       JSON.stringify(data),
-  //     );
-  //   } catch (e) {
-  //     console.warn("Failed to store notification metadata in AsyncStorage:", e);
-  //   }
-  // }
+  if (data.type === "patrol-notification-tap" && data.shouldAutoLogin) {
+    try {
+      console.log("ACTIVE PATROL NOTIFICATION TAP (AUTO-LOGIN REQUEST) ───");
+      await AsyncStorage.setItem(
+        "@pnp_sos_notification_data",
+        JSON.stringify(data),
+      );
+    } catch (e) {
+      console.warn("Failed to store notification metadata in AsyncStorage:", e);
+    }
+  }
   // Note: "sos-button" is handled strictly in App.tsx now to prevent conflicts
 });
 
@@ -161,6 +161,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     let attempt = 0;
     const maxAttempts = 3;
     let success = false;
+
+    await AsyncStorage.setItem("@pnp_auto_login_requested", "true");
 
     while (attempt < maxAttempts && !success) {
       try {
@@ -210,21 +212,21 @@ export const startBackgroundUpdates = async (personnelId: string) => {
   const isGpsEnabled = await Location.hasServicesEnabledAsync();
   if (!isGpsEnabled) throw new Error("System GPS is turned off.");
 
-  try {
-    const { status: notifStatus } =
-      await Notifications.requestPermissionsAsync();
-    if (notifStatus === "granted") {
-      await Notifications.setNotificationCategoryAsync("patrol-session", [
-        {
-          identifier: "sos-button",
-          buttonTitle: "SEND DISTRESS SIGNAL",
-          options: { opensAppToForeground: true },
-        },
-      ]);
-    }
-  } catch (e) {
-    console.warn("Failed to set notification category", e);
-  }
+  // try {
+  //   const { status: notifStatus } =
+  //     await Notifications.requestPermissionsAsync();
+  //   if (notifStatus === "granted") {
+  //     await Notifications.setNotificationCategoryAsync("patrol-session", [
+  //       {
+  //         identifier: "sos-button",
+  //         buttonTitle: "SEND DISTRESS SIGNAL",
+  //         options: { opensAppToForeground: true },
+  //       },
+  //     ]);
+  //   }
+  // } catch (e) {
+  //   console.warn("Failed to set notification category", e);
+  // }
 
   await AsyncStorage.setItem("@pnp_active_personnel_id", personnelId);
   await AsyncStorage.setItem("@pnp_shift_status", "ACTIVE");
@@ -237,9 +239,8 @@ export const startBackgroundUpdates = async (personnelId: string) => {
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: "Project J.O.E.M.A.R. Active",
-      notificationBody:
-        "Patrol routing log is live. Pull down to access SOS button.",
+      notificationTitle: "Project J.O.E.M.A.R Active",
+      notificationBody: "Patrol routing log is live. Tap to view details.",
       notificationColor: "#1E3A8A",
       categoryIdentifier: "patrol-session",
     } as any,

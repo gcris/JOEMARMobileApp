@@ -27,6 +27,7 @@ import { AccountScreen } from "./src/components/AccountScreen";
 import { registerNotificationLayouts } from "./src/services/BackgroundTracker";
 import SosAlertModal from "./src/components/SosAlertModal";
 import SOSNotification from "./src/services/SOSNotification";
+// import SOSNotification from "./src/services/SOSNotification";
 
 type RootStackParamList = {
   Main: undefined;
@@ -64,7 +65,6 @@ export default function App() {
     login,
     logout,
     openSystemSettings,
-    triggerEmergencySOS,
     requestForegroundPermission,
     requestBackgroundPermission,
     requestNotificationPermissions,
@@ -103,21 +103,21 @@ export default function App() {
           ) {
             processedNotificationIds.current.push(notificationId);
 
-            SOSNotification.show({
-              title: notification.request.content.title ?? "DISTRESS SIGNAL",
-              body: notification.request.content.body ?? "",
-              senderName: data.senderName,
-              phone_number: data.phone_number,
-              latitude: data.latitude,
-              longitude: data.longitude,
-            });
+            // SOSNotification.show({
+            //   title: notification.request.content.title ?? "DISTRESS SIGNAL",
+            //   body: notification.request.content.body ?? "",
+            //   senderName: data.senderName,
+            //   phone_number: data.phone_number,
+            //   latitude: data.latitude,
+            //   longitude: data.longitude,
+            // });
 
-            setSosAlertData({
-              senderName: data.senderName,
-              latitude: data.latitude,
-              longitude: data.longitude,
-              phone_number: data.phone_number || "",
-            });
+            // setSosAlertData({
+            //   senderName: data.senderName,
+            //   latitude: data.latitude,
+            //   longitude: data.longitude,
+            //   phone_number: data.phone_number || "",
+            // });
           }
         }
       } catch (error) {
@@ -157,7 +157,7 @@ export default function App() {
     // };
 
     // Run both checks on startup
-    checkInitialNotification();
+    // checkInitialNotification();
     // checkForStoredSosAlert();
 
     // Also listen for app state changes to check when coming to foreground (for background notifications)

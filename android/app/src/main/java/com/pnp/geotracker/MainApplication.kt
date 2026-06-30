@@ -1,5 +1,7 @@
 package com.pnp.geotracker
 
+import com.pnp.geotracker.SOSPackage
+import com.pnp.geotracker.FCMPackage
 import android.app.Application
 import android.content.res.Configuration
 
@@ -21,9 +23,12 @@ class MainApplication : Application(), ReactApplication {
         this,
         object : DefaultReactNativeHost(this) {
           override fun getPackages(): List<ReactPackage> {
-            // Packages that cannot be autolinked yet can be added manually here, for example:
-            // packages.add(new MyReactNativePackage());
-            return PackageList(this).packages
+              val packages = PackageList(this).packages.toMutableList()
+
+              packages.add(SOSPackage())
+              packages.add(FCMPackage())
+
+              return packages
           }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"

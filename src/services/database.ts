@@ -36,6 +36,7 @@ export const getPersonnelByBadge = async (
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
       expo_push_token: data.expo_push_token,
+      fcm_token: data.fcm_token,
     };
   } catch (error) {
     console.error("Error fetching personnel by badge:", error);
@@ -75,6 +76,7 @@ export const getPersonnelByEmail = async (
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
       expo_push_token: data.expo_push_token,
+      fcm_token: data.fcm_token,
     };
   } catch (error) {
     console.error("Error fetching personnel by email:", error);
@@ -122,6 +124,7 @@ export const findCandidatePersonnel = async (
       // email: data.email,
       photo_url: data.photo_url, // Add photo URL
       expo_push_token: data.expo_push_token,
+      fcm_token: data.fcm_token,
     };
   } catch (error) {
     console.error("Error finding candidate personnel:", error);
@@ -161,6 +164,7 @@ export const getPersonnelById = async (
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
       expo_push_token: data.expo_push_token,
+      fcm_token: data.fcm_token,
     };
   } catch (error) {
     console.error("Error fetching personnel by ID:", error);

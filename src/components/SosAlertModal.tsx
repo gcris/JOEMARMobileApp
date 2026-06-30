@@ -91,20 +91,31 @@ const SosAlertModal: React.FC<SosAlertModalProps> = ({
                 paddingHorizontal: 10,
                 borderRadius: 5,
               }}
-              onPress={() => {
+              onPress={async () => {
                 // Handle "Get Direction" press
                 if (sosAlertData?.latitude && sosAlertData?.longitude) {
                   const lat = sosAlertData.latitude;
                   const lng = sosAlertData.longitude;
-                  const mapUrl =
-                    Platform.OS === "ios"
-                      ? `maps://?d=${lat},${lng}`
-                      : `geo:${lat},${lng}?q=${lat},${lng}(Officer+in+Distress)`;
-                  Linking.openURL(mapUrl).catch((err) =>
-                    console.error("Failed to open map:", err),
-                  );
+                  const googleNavigation = `google.navigation:q=${lat},${lng}`;
+
+                  const googleWeb = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+
+                  try {
+                    const supported =
+                      await Linking.canOpenURL(googleNavigation);
+
+                    if (supported) {
+                      await Linking.openURL(googleNavigation);
+                    } else {
+                      await Linking.openURL(googleWeb);
+                    }
+
+                    //onClose();
+                  } catch (e) {
+                    console.error(e);
+                  }
                 }
-                onClose(); // Close the modal after opening map
+                // onClose(); // Close the modal after opening map
               }}
             >
               <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
