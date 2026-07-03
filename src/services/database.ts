@@ -35,7 +35,6 @@ export const getPersonnelByBadge = async (
       role: data.role,
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
-      expo_push_token: data.expo_push_token,
       fcm_token: data.fcm_token,
     };
   } catch (error) {
@@ -75,7 +74,6 @@ export const getPersonnelByEmail = async (
       role: data.role,
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
-      expo_push_token: data.expo_push_token,
       fcm_token: data.fcm_token,
     };
   } catch (error) {
@@ -121,9 +119,7 @@ export const findCandidatePersonnel = async (
       viberNumber: data.viber_number,
       isApproved: data.is_approved,
       role: data.role,
-      // email: data.email,
       photo_url: data.photo_url, // Add photo URL
-      expo_push_token: data.expo_push_token,
       fcm_token: data.fcm_token,
     };
   } catch (error) {
@@ -163,7 +159,6 @@ export const getPersonnelById = async (
       role: data.role,
       email: data.email,
       photo_url: data.photo_url, // Add photo URL
-      expo_push_token: data.expo_push_token,
       fcm_token: data.fcm_token,
     };
   } catch (error) {
@@ -346,57 +341,67 @@ export const getScheduleByPersonnel = async (
 };
 
 // Local storage key for personnel logs
-const LOCAL_LOGS_KEY = "@pnp_personnel_logs";
+const LOCAL_LOGS_KEY = "@pnp_patrol_logs";
 
 // --- Log Operations ---
 export const insertPersonnelLog = async (log: PersonnelLog): Promise<void> => {
-  // Try to insert into Supabase first if configured
-  if (isSupabaseConfigured()) {
-    try {
-      const { error } = await supabase.from("personnel_logs").insert({
-        personnel_id: log.personnelId,
-        latitude: log.latitude,
-        longitude: log.longitude,
-        speed: log.speed,
-        network_signal: log.networkSignal,
-        duty_type: log.dutyType,
-        captured_at: log.capturedAt,
-      });
-
-      if (!error) {
-        // Successfully inserted into Supabase, no need for local storage
-        return;
-      }
-
-      // If Supabase fails, fall back to local storage
-      console.warn(
-        "Failed to insert log into Supabase, falling back to local storage:",
-        error,
-      );
-    } catch (error) {
-      console.warn(
-        "Failed to insert log into Supabase, falling back to local storage:",
-        error,
-      );
-    }
-  }
-
-  // Fall back to local storage
   try {
-    // Get existing logs from local storage
     const existingLogsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
+
     const existingLogs: PersonnelLog[] = existingLogsJson
       ? JSON.parse(existingLogsJson)
       : [];
 
-    // Add new log
-    const updatedLogs = [...existingLogs, log];
+    existingLogs.push({
+      ...log,
+      isSynced: false,
+    });
 
-    // Save back to local storage
-    await AsyncStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(updatedLogs));
+    await AsyncStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(existingLogs));
   } catch (error) {
-    console.error("Error storing log in local storage:", error);
+    console.error("Error saving patrol log locally:", error);
     throw error;
+  }
+};
+
+export const syncPendingPatrolLogs = async (): Promise<number> => {
+  if (!isSupabaseConfigured()) return 0;
+
+  try {
+    const logsJson = await AsyncStorage.getItem(LOCAL_LOGS_KEY);
+
+    if (!logsJson) return 0;
+
+    const logs: PersonnelLog[] = JSON.parse(logsJson);
+
+    const unsynced = logs.filter((l) => !l.isSynced);
+
+    if (unsynced.length === 0) return 0;
+
+    const payload = unsynced.map((log) => ({
+      personnel_id: log.personnelId,
+      latitude: log.latitude,
+      longitude: log.longitude,
+      speed: log.speed,
+      network_signal: log.networkSignal,
+      duty_type: log.dutyType,
+      captured_at: log.capturedAt,
+    }));
+
+    const { error } = await supabase.from("patrol_logs").insert(payload);
+
+    if (error) throw error;
+
+    const syncedIds = new Set(unsynced.map((l) => l.id));
+
+    const updated = logs.filter((l) => !syncedIds.has(l.id));
+
+    await AsyncStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(updated));
+
+    return unsynced.length;
+  } catch (err) {
+    console.error("Sync failed:", err);
+    return 0;
   }
 };
 
@@ -425,7 +430,7 @@ export const getLatestLogs = async (
   try {
     // Get latest logs from Supabase
     const { data: supabaseData, error: supabaseError } = await supabase
-      .from("personnel_logs")
+      .from("patrol_logs")
       .select("*")
       .eq("personnel_id", personnel_id)
       .order("captured_at", { ascending: false })

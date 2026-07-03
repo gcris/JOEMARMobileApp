@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat
 
 object SOSNotificationHelper {
 
-    private const val CHANNEL_ID = "emergency-alerts-v4"
+    private const val CHANNEL_ID = "emergency-alerts-v6"
 
     fun showSOS(
         context: Context,
@@ -49,6 +49,7 @@ object SOSNotificationHelper {
             channel.description = "Emergency SOS Alerts"
             channel.enableLights(true)
             channel.enableVibration(true)
+            channel.setSound(soundUri, attributes)
 
             channel.vibrationPattern = longArrayOf(
                 0,
@@ -58,8 +59,6 @@ object SOSNotificationHelper {
                 300,
                 600
             )
-
-            channel.setSound(soundUri, attributes)
 
             manager.createNotificationChannel(channel)
         }
@@ -92,10 +91,22 @@ object SOSNotificationHelper {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(false)
                 .setOngoing(true)
+                // .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setVibrate(
+                    longArrayOf(
+                        0,
+                        600,
+                        300,
+                        600,
+                        300,
+                        600
+                    )
+                )
                 .setFullScreenIntent(pendingIntent, true)
+                .setContentIntent(pendingIntent)
                 .build()
 
         manager.notify(9999, notification)

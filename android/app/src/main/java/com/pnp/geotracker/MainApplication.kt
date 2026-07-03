@@ -2,6 +2,7 @@ package com.pnp.geotracker
 
 import com.pnp.geotracker.SOSPackage
 import com.pnp.geotracker.FCMPackage
+import com.pnp.geotracker.SignalStrengthPackage
 import android.app.Application
 import android.content.res.Configuration
 
@@ -27,6 +28,7 @@ class MainApplication : Application(), ReactApplication {
 
               packages.add(SOSPackage())
               packages.add(FCMPackage())
+              packages.add(SignalStrengthPackage())
 
               return packages
           }

@@ -20,7 +20,6 @@ export interface Personnel {
   role: string;
   email?: string;
   photo_url?: string; // URL to the personnel's photo in Supabase storage
-  expo_push_token: string;
   fcm_token: string;
 }
 

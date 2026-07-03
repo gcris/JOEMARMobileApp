@@ -3382,12 +3382,12 @@ index 6649b25..1faf639 100644
    useEffect(() => {
 -    if (!personnel || !isSupabaseConfigured()) return;
 -
--    // Subscribe to new personnel_logs entries
+-    // Subscribe to new patrol_logs entries
 -    const sosSubscription = supabase
--      .channel("personnel_logs_changes")
+-      .channel("patrol_logs_changes")
 -      .on(
 -        "postgres_changes",
--        { event: "INSERT", schema: "public", table: "personnel_logs" },
+-        { event: "INSERT", schema: "public", table: "patrol_logs" },
 -        (payload) => {
 -          const newLog = payload.new as PersonnelLog;
 -
@@ -3454,10 +3454,10 @@ index 6649b25..1faf639 100644
 +      // B. Synchronously build listener mappings after audio channel registers
 +      try {
 +        const channelInstance = supabase
-+          .channel("personnel_logs_changes")
++          .channel("patrol_logs_changes")
 +          .on(
 +            "postgres_changes",
-+            { event: "INSERT", schema: "public", table: "personnel_logs" },
++            { event: "INSERT", schema: "public", table: "patrol_logs" },
 +            (payload) => {
 +              if (!isHookMounted) return;
 +
@@ -3860,7 +3860,7 @@ index 6649b25..1faf639 100644
 -                // if (isSupabaseConfigured()) {
 -                //   try {
 -                //     const { error } = await supabase
--                //       .from("personnel_logs")
+-                //       .from("patrol_logs")
 -                //       .insert([
 -                //         {
 -                //           id: uniqueId,
@@ -4668,7 +4668,7 @@ index a7ac6ce..87a323d 100644
    try {
      // Get latest logs from Supabase
      const { data: supabaseData, error: supabaseError } = await supabase
-       .from("personnel_logs")
+       .from("patrol_logs")
 -      .select("*")
 +      .select("*, personnel(*)")
 +      .eq("personnel_id", p_id)

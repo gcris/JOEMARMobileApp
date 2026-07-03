@@ -8,6 +8,8 @@ import android.widget.TextView
 import android.media.MediaPlayer
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.content.Context
+import android.app.NotificationManager
 
 import androidx.appcompat.app.AppCompatActivity
 
@@ -27,6 +29,8 @@ class SOSActivity : AppCompatActivity() {
                 0
             )
             vibrator.vibrate(effect)
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
         } else {
             @Suppress("DEPRECATION")
             vibrator.vibrate(longArrayOf(0, 1000, 500), 0)
@@ -69,6 +73,9 @@ class SOSActivity : AppCompatActivity() {
 
                 startActivity(intent)
 
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancel(9999)
+
                 finish()
             }
 
@@ -86,6 +93,9 @@ class SOSActivity : AppCompatActivity() {
 
                 startActivity(intent)
 
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancel(9999)
+
                 finish()
             }
 
@@ -101,6 +111,9 @@ class SOSActivity : AppCompatActivity() {
 
                 vibrator.cancel();
 
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancel(9999)
+
                 finish()
             }
     }
@@ -115,6 +128,9 @@ class SOSActivity : AppCompatActivity() {
         mediaPlayer = null
 
         vibrator.cancel();
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(9999)
 
         super.onDestroy()
     }

@@ -5,9 +5,7 @@
     "moduleResolution": "Bundler",
     "jsx": "react-native",
     "allowSyntheticDefaultImports": true,
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   },
   "extends": "expo/tsconfig.base"
 }

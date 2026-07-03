@@ -5,19 +5,25 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Switch,
-  Clipboard,
   Alert,
   Image,
-  TextInput,
   Linking,
-  StyleSheet,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Personnel, PersonnelLog, Schedule } from "../types";
 import { getStyles, getThemeColors } from "../theme/styles";
-import { enrollMFA } from "../services/supabaseMFA";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import FontAwesome from "@expo/vector-icons/FontAwesome6";
+
+const DUTY_TYPES = [
+  "Foot Patrol",
+  "Mobile Patrol",
+  "Bike Patrol",
+  "Seaborne Patrol",
+  "Checkpoint",
+  "Special Event",
+  "Simulation Exercise",
+];
 
 interface DashboardViewProps {
   personnel: Personnel | null;
@@ -44,6 +50,9 @@ interface DashboardViewProps {
   ) => Promise<boolean>;
   onDisable2FA: () => Promise<void>;
 
+  // Duty type selector
+  setActiveDutyType: (value: string) => void;
+
   isDarkTheme: boolean;
   foregroundGranted: boolean | null;
   backgroundGranted: boolean | null;
@@ -64,12 +73,19 @@ export const DashboardView = ({
   onSync,
   onOpenSettings,
   onEmergencySOS,
+  onClearCache,
+  autoSync,
+  onToggleAutoSync,
+  is2FAEnabled,
+  onEnable2FA,
+  onDisable2FA,
   isDarkTheme,
   foregroundGranted,
   backgroundGranted,
   onRequestForeground,
   onRequestBackground,
   onEnableGpsInline,
+  setActiveDutyType,
 }: DashboardViewProps) => {
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
@@ -79,6 +95,10 @@ export const DashboardView = ({
   const [activeNav, setActiveNav] = useState<"home" | "sos" | "account">(
     "home",
   );
+  // Duty type selection for patrol logs
+  const [selectedDutyType, setSelectedDutyType] =
+    useState<string>("Foot Patrol");
+  const [showDropdown, setShowDropdown] = useState<boolean>(false);
 
   const handlePhoneCall = (phoneNumber: string) => {
     if (!phoneNumber) return;
@@ -451,387 +471,454 @@ export const DashboardView = ({
                 even when screen is closed or minimized.
               </Text>
 
-              <TouchableOpacity
-                style={[
-                  styles.toggleShiftBtn,
-                  isShiftActive
-                    ? styles.toggleShiftBtnStop
-                    : styles.toggleShiftBtnStart,
-                ]}
-                onPress={onToggleShift}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.toggleShiftBtnText}>
-                  {isShiftActive ? "STOP PATROLLING" : "START PATROLLING"}
-                </Text>
-              </TouchableOpacity>
-            </View>
+              {/* Duty Type Selector */}
+              <View style={styles.dutyTypeSelector}>
+                <Text style={styles.dutyTypeLabel}>Duty Type:</Text>
+                <TouchableOpacity
+                  onPress={() => setShowDropdown(!showDropdown)}
+                  disabled={isShiftActive}
+                  style={[
+                    styles.dropdownButton,
+                    showDropdown && styles.dropdownButtonActive,
+                  ]}
+                >
+                  <Text style={styles.dropdownButtonText}>
+                    {selectedDutyType || "Select Duty Type"}
+                  </Text>
+                  <Ionicons
+                    name={showDropdown ? "chevron-up" : "chevron-down"}
+                    size={20}
+                    style={styles.dropdownIcon}
+                  />
+                </TouchableOpacity>
 
-            {/* TELEMETRY MANUAL GATEWAY SYNC BAR */}
-            <View style={styles.card}>
-              <Text style={styles.cardHeading}>
-                PENDING LOGS STORED IN YOUR PHONE
-              </Text>
-              <View style={styles.syncCountsRow}>
-                <View style={styles.countWidget}>
-                  <Text style={styles.countVal}>{unsyncedCount}</Text>
-                  <Text style={styles.countTitle}>Pending logs</Text>
+                {showDropdown && (
+                  <View style={styles.dropdownMenu}>
+                    {DUTY_TYPES.map((dutyType, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        onPress={() => {
+                          setSelectedDutyType(dutyType);
+                          setShowDropdown(false);
+                          setActiveDutyType(dutyType);
+                        }}
+                        style={styles.dropdownItem}
+                      >
+                        <Text style={styles.dropdownItemText}>{dutyType}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View>
+                <TouchableOpacity
+                  style={[
+                    styles.toggleShiftBtn,
+                    isShiftActive
+                      ? styles.toggleShiftBtnStop
+                      : styles.toggleShiftBtnStart,
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={async () => {
+                    const action = isShiftActive ? "stop" : "start";
+                    const confirmed = await new Promise<boolean>((resolve) => {
+                      Alert.alert(
+                        `Confirm Patrol ${action.toUpperCase()}`,
+                        `Are you sure you want to ${action} patrol?`,
+                        [
+                          {
+                            text: "Cancel",
+                            style: "cancel",
+                            onPress: () => resolve(false),
+                          },
+                          {
+                            text: "Confirm",
+                            onPress: () => resolve(true),
+                          },
+                        ],
+                      );
+                    });
+                    if (confirmed) {
+                      onToggleShift();
+                    }
+                  }}
+                >
+                  <Text style={styles.toggleShiftBtnText}>
+                    {isShiftActive ? "STOP" : "START"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* TELEMETRY MANUAL GATEWAY SYNC BAR */}
+              <View style={styles.card}>
+                <Text style={styles.cardHeading}>
+                  PENDING LOGS STORED IN YOUR PHONE
+                </Text>
+                <View style={styles.syncCountsRow}>
+                  <View style={styles.countWidget}>
+                    <Text style={styles.countVal}>{unsyncedCount}</Text>
+                    <Text style={styles.countTitle}>Pending logs</Text>
+                  </View>
+                </View>
+
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.primaryActionBtn]}
+                    onPress={onSync}
+                    disabled={isSyncing}
+                    activeOpacity={0.8}
+                  >
+                    {isSyncing ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.actionBtnText}>Sync Logs</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
 
-              <View style={styles.actionsRow}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.primaryActionBtn]}
-                  onPress={onSync}
-                  disabled={isSyncing}
-                  activeOpacity={0.8}
-                >
-                  {isSyncing ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.actionBtnText}>Sync Logs</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* TELEMETRY COORDINATES LOG STREAM FEED */}
-            <View style={styles.card}>
-              <Text style={styles.cardHeading}>RECENT GPS DATA</Text>
-              {logs.length === 0 ? (
-                <Text style={styles.emptyTableText}>
-                  No path records active in database. Start shift patrol.
-                </Text>
-              ) : (
-                logs.map((log, index) => {
-                  const isSos = log.dutyType === "EMERGENCY_SOS";
-                  const localTime =
-                    log.capturedAt.split("T")[1]?.substring(0, 8) || "00:00:00";
-                  return (
-                    <View
-                      key={log.id || index}
-                      style={[
-                        styles.logRow,
-                        isSos && styles.logRowSos,
-                        {
-                          paddingHorizontal: isSos ? 8 : 0,
-                          borderRadius: isSos ? 6 : 0,
-                        },
-                      ]}
-                    >
-                      <View style={styles.logLeft}>
-                        <Text style={styles.logTimeSymbol}>
-                          {isSos ? "🚨" : "📍"}
-                        </Text>
-                        <View>
+              {/* TELEMETRY COORDINATES LOG STREAM FEED */}
+              {/* <View style={styles.card}>
+                <Text style={styles.cardHeading}>RECENT GPS DATA</Text>
+                {logs.length === 0 ? (
+                  <Text style={styles.emptyTableText}>
+                    No path records active in database. Start shift patrol.
+                  </Text>
+                ) : (
+                  logs.map((log, index) => {
+                    const isSos = log.dutyType === "EMERGENCY_SOS";
+                    const localTime =
+                      log.capturedAt.split("T")[1]?.substring(0, 8) ||
+                      "00:00:00";
+                    return (
+                      <View
+                        key={log.id || index}
+                        style={[
+                          styles.logRow,
+                          isSos && styles.logRowSos,
+                          {
+                            paddingHorizontal: isSos ? 8 : 0,
+                            borderRadius: isSos ? 6 : 0,
+                          },
+                        ]}
+                      >
+                        <View style={styles.logLeft}>
+                          <Text style={styles.logTimeSymbol}>
+                            {isSos ? "🚨" : "📍"}
+                          </Text>
+                          <View>
+                            <Text
+                              style={[
+                                styles.logCoords,
+                                isSos && styles.logRowSosText,
+                              ]}
+                            >
+                              {log.latitude.toFixed(5)},{" "}
+                              {log.longitude.toFixed(5)}
+                            </Text>
+                            <Text style={styles.logCapturedText}>
+                              {log.capturedAt.split("T")[0]}
+                              {" at "}
+                              {localTime}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.logRight}>
+                          <Text style={styles.logSignalText}>
+                            📶 {log.networkSignal}/4
+                          </Text>
                           <Text
                             style={[
-                              styles.logCoords,
+                              styles.logSpeedText,
                               isSos && styles.logRowSosText,
+                              { color: colors.blackText },
                             ]}
                           >
-                            {log.latitude.toFixed(5)},{" "}
-                            {log.longitude.toFixed(5)}
-                          </Text>
-                          <Text style={styles.logCapturedText}>
-                            {log.capturedAt.split("T")[0]}
-                            {" at "}
-                            {localTime}
+                            {isSos ? "EMERGENCY" : log.dutyType}
                           </Text>
                         </View>
                       </View>
-                      <View style={styles.logRight}>
-                        {/* <Text style={styles.logSignalText}>
-                          📶 {log.networkSignal}/4
-                        </Text> */}
-                        <Text
-                          style={[
-                            styles.logSpeedText,
-                            isSos && styles.logRowSosText,
-                            { color: colors.blackText },
-                          ]}
-                        >
-                          {isSos
-                            ? "EMERGENCY"
-                            : `${(log.speed * 3.6).toFixed(1)} km/h`}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
+                    );
+                  })
+                )}
+              </View> */}
 
-            {/* CONSOLIDATED PNP ASSIGNED DUTY CONSOLE & INSTRUCTIONS */}
-            <View style={styles.card}>
-              <Text style={styles.cardHeading}>PATROL SCHEDULE</Text>
-              {schedule && schedule.length > 0 ? (
-                // Wrap the list in a container View
-                <View style={{ gap: 16 }}>
-                  {schedule.map((item, index) => (
-                    <View
-                      key={item.id || index} // Unique key identifier for the React fiber tree
-                      style={{
-                        gap: 10,
-                        padding: 12,
-                        backgroundColor: isDarkTheme ? "#1B2C24" : "#E6F4EA",
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor: colors.borderBlue + "22", // Subtle transparent border
-                      }}
-                    >
-                      {/* Sector Row */}
+              {/* CONSOLIDATED PNP ASSIGNED DUTY CONSOLE & INSTRUCTIONS */}
+              <View style={styles.card}>
+                <Text style={styles.cardHeading}>PATROL SCHEDULE</Text>
+                {schedule && schedule.length > 0 ? (
+                  // Wrap the list in a container View
+                  <View style={{ gap: 16 }}>
+                    {schedule.map((item, index) => (
                       <View
+                        key={item.id || index} // Unique key identifier for the React fiber tree
                         style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          gap: 12,
+                          gap: 10,
+                          padding: 12,
+                          backgroundColor: isDarkTheme ? "#1B2C24" : "#E6F4EA",
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: colors.borderBlue + "22", // Subtle transparent border
                         }}
                       >
-                        <Text
-                          style={{ fontSize: 18, color: colors.textPrimary }}
-                        >
-                          Sector:
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 18,
-                            fontWeight: "700",
-                            color: colors.blackText,
-                            flexShrink: 1,
-                            textAlign: "right",
-                          }}
-                        >
-                          {item.sector}
-                        </Text>
-                      </View>
-
-                      {/* Duty Type Row */}
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          gap: 12,
-                        }}
-                      >
-                        <Text
-                          style={{ fontSize: 18, color: colors.textPrimary }}
-                        >
-                          Duty Type:
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 18,
-                            fontWeight: "700",
-                            color: colors.blackText,
-                            flexShrink: 1,
-                            textAlign: "right",
-                          }}
-                        >
-                          {item.duty_type}
-                        </Text>
-                      </View>
-
-                      {/* Force Scheduled Date Row */}
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          borderTopWidth: 0.5,
-                          borderTopColor: colors.borderBlue,
-                        }}
-                      >
-                        <Text
-                          style={{ fontSize: 18, color: colors.textPrimary }}
-                        >
-                          Scheduled Date:
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 18,
-                            fontWeight: "bold",
-                            color: colors.blackText,
-                          }}
-                        >
-                          {new Date().toISOString().split("T")[0]}
-                        </Text>
-                      </View>
-
-                      {/* Duration of Duty Row */}
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          borderTopWidth: 0.5,
-                          borderTopColor: colors.borderBlue,
-                        }}
-                      >
-                        <Text
-                          style={{ fontSize: 18, color: colors.textPrimary }}
-                        >
-                          Duration of Duty:
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 18,
-                            fontWeight: "bold",
-                            color: colors.blackText,
-                          }}
-                        >
-                          {item.timeFrom}
-                          {" to "}
-                          {item.timeTo}
-                        </Text>
-                      </View>
-
-                      {/* Assigned Personnel Row */}
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          borderTopWidth: 0.5,
-                          borderTopColor: colors.borderBlue,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 18,
-                            fontWeight: "bold",
-                            color: colors.textPrimary,
-                          }}
-                        >
-                          Assigned Personnel
-                        </Text>
-                      </View>
-                      {item.personnel && item.personnel.length > 0 && (
+                        {/* Sector Row */}
                         <View
                           style={{
-                            flexDirection: "column",
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 12,
+                          }}
+                        >
+                          <Text
+                            style={{ fontSize: 18, color: colors.textPrimary }}
+                          >
+                            Sector:
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 18,
+                              fontWeight: "700",
+                              color: colors.blackText,
+                              flexShrink: 1,
+                              textAlign: "right",
+                            }}
+                          >
+                            {item.sector}
+                          </Text>
+                        </View>
+
+                        {/* Duty Type Row */}
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 12,
+                          }}
+                        >
+                          <Text
+                            style={{ fontSize: 18, color: colors.textPrimary }}
+                          >
+                            Duty Type:
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 18,
+                              fontWeight: "700",
+                              color: colors.blackText,
+                              flexShrink: 1,
+                              textAlign: "right",
+                            }}
+                          >
+                            {item.duty_type}
+                          </Text>
+                        </View>
+
+                        {/* Force Scheduled Date Row */}
+                        <View
+                          style={{
+                            flexDirection: "row",
                             justifyContent: "space-between",
                             borderTopWidth: 0.5,
                             borderTopColor: colors.borderBlue,
                           }}
                         >
-                          {item.personnel.map((pItem, pIndex) => (
-                            <View
-                              key={pIndex}
-                              style={{
-                                flexDirection: "column",
-                                gap: 8,
-                                borderTopWidth: 0.5,
-                                borderTopColor: colors.borderBlue,
-                              }}
-                            >
-                              {/* Row 1: Rank and Fullname */}
-                              <View
-                                style={{
-                                  flexDirection: "row",
-                                  justifyContent: "space-between",
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    fontSize: 18,
-                                    fontWeight: "bold",
-                                    color: colors.textPrimary,
-                                  }}
-                                >
-                                  {pItem.rank_name} {pItem.fullname}
-                                </Text>
-                              </View>
+                          <Text
+                            style={{ fontSize: 18, color: colors.textPrimary }}
+                          >
+                            Scheduled Date:
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 18,
+                              fontWeight: "bold",
+                              color: colors.blackText,
+                            }}
+                          >
+                            {new Date().toISOString().split("T")[0]}
+                          </Text>
+                        </View>
 
-                              {/* Row 2: Touch-Target Action Links */}
+                        {/* Duration of Duty Row */}
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            borderTopWidth: 0.5,
+                            borderTopColor: colors.borderBlue,
+                          }}
+                        >
+                          <Text
+                            style={{ fontSize: 18, color: colors.textPrimary }}
+                          >
+                            Duration of Duty:
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 18,
+                              fontWeight: "bold",
+                              color: colors.blackText,
+                            }}
+                          >
+                            {item.timeFrom}
+                            {" to "}
+                            {item.timeTo}
+                          </Text>
+                        </View>
+
+                        {/* Assigned Personnel Row */}
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            borderTopWidth: 0.5,
+                            borderTopColor: colors.borderBlue,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 18,
+                              fontWeight: "bold",
+                              color: colors.textPrimary,
+                            }}
+                          >
+                            Assigned Personnel
+                          </Text>
+                        </View>
+                        {item.personnel && item.personnel.length > 0 && (
+                          <View
+                            style={{
+                              flexDirection: "column",
+                              justifyContent: "space-between",
+                              borderTopWidth: 0.5,
+                              borderTopColor: colors.borderBlue,
+                            }}
+                          >
+                            {item.personnel.map((pItem, pIndex) => (
                               <View
+                                key={pIndex}
                                 style={{
-                                  flexDirection: "row",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
+                                  flexDirection: "column",
+                                  gap: 8,
+                                  borderTopWidth: 0.5,
+                                  borderTopColor: colors.borderBlue,
                                 }}
                               >
-                                {/* Clickable Mobile Phone Action Link */}
-                                <TouchableOpacity
-                                  onPress={() =>
-                                    handlePhoneCall(pItem.phone_number)
-                                  }
-                                  disabled={!pItem.phone_number}
+                                {/* Row 1: Rank and Fullname */}
+                                <View
                                   style={{
                                     flexDirection: "row",
-                                    alignItems: "center", // Vertically centers icon and text inside phone link
-                                    gap: 6, // Adds perfect spacing between the call icon and the string
+                                    justifyContent: "space-between",
                                   }}
                                 >
-                                  <Ionicons
-                                    name="call"
-                                    size={20}
-                                    color={colors.textPrimary}
-                                  />
                                   <Text
                                     style={{
-                                      fontSize: 20,
+                                      fontSize: 18,
+                                      fontWeight: "bold",
                                       color: colors.textPrimary,
-                                      includeFontPadding: false, // Prevents native Android font layout offsets
                                     }}
                                   >
-                                    {pItem.phone_number || "N/A"}
+                                    {pItem.rank_name} {pItem.fullname}
                                   </Text>
-                                </TouchableOpacity>
+                                </View>
 
-                                {/* Clickable Viber Action Link */}
-                                <TouchableOpacity
-                                  onPress={() =>
-                                    handleViberCall(pItem.viber_number)
-                                  }
-                                  disabled={!pItem.viber_number}
-                                  activeOpacity={0.6}
+                                {/* Row 2: Touch-Target Action Links */}
+                                <View
                                   style={{
                                     flexDirection: "row",
-                                    alignItems: "center", // Vertically centers text inside Viber link
-                                    gap: 4,
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
                                   }}
                                 >
-                                  <Text
+                                  {/* Clickable Mobile Phone Action Link */}
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      handlePhoneCall(pItem.phone_number)
+                                    }
+                                    disabled={!pItem.phone_number}
                                     style={{
-                                      fontSize: 13,
-                                      color: pItem.viber_number
-                                        ? "#7360F2"
-                                        : colors.textSecondary,
-                                      textAlign: "right",
-                                      includeFontPadding: false,
+                                      flexDirection: "row",
+                                      alignItems: "center", // Vertically centers icon and text inside phone link
+                                      gap: 6, // Adds perfect spacing between the call icon and the string
                                     }}
                                   >
                                     <Ionicons
-                                      name="chatbox"
+                                      name="call"
                                       size={20}
-                                      color="#7360F2"
+                                      color={colors.textPrimary}
                                     />
                                     <Text
                                       style={{
                                         fontSize: 20,
-                                        color: "#7360F2",
+                                        color: colors.textPrimary,
                                         includeFontPadding: false, // Prevents native Android font layout offsets
                                       }}
                                     >
-                                      {pItem.viber_number || "N/A"}
+                                      {pItem.phone_number || "N/A"}
                                     </Text>
-                                  </Text>
-                                </TouchableOpacity>
+                                  </TouchableOpacity>
+
+                                  {/* Clickable Viber Action Link */}
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      handleViberCall(pItem.viber_number)
+                                    }
+                                    disabled={!pItem.viber_number}
+                                    activeOpacity={0.6}
+                                    style={{
+                                      flexDirection: "row",
+                                      alignItems: "center", // Vertically centers text inside Viber link
+                                      gap: 4,
+                                    }}
+                                  >
+                                    <Text
+                                      style={{
+                                        fontSize: 13,
+                                        color: pItem.viber_number
+                                          ? "#7360F2"
+                                          : colors.textSecondary,
+                                        textAlign: "right",
+                                        includeFontPadding: false,
+                                      }}
+                                    >
+                                      <FontAwesome
+                                        name="viber"
+                                        size={20} // Perfectly scaled to fit next to the number text
+                                        color={
+                                          pItem.viber_number
+                                            ? "#7360F2"
+                                            : colors.textSecondary
+                                        } // Creates a clean spacing between the logo and the number
+                                      />{" "}
+                                      <Text
+                                        style={{
+                                          fontSize: 20,
+                                          color: "#7360F2",
+                                          includeFontPadding: false, // Prevents native Android font layout offsets
+                                        }}
+                                      >
+                                        {pItem.viber_number || "N/A"}
+                                      </Text>
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
                               </View>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <View style={{ padding: 20, alignItems: "center" }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 20 }}>
-                    No active duty schedules assigned.
-                  </Text>
-                </View>
-              )}
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ padding: 20, alignItems: "center" }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 20 }}>
+                      No active duty schedules assigned.
+                    </Text>
+                  </View>
+                )}
+              </View>
             </View>
           </View>
         )}

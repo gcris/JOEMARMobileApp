@@ -398,10 +398,62 @@ export const getStyles = (isDark: boolean) => {
       margin: 14,
       textAlign: "justify",
     },
+    dutyTypeSelector: {
+      position: "relative",
+      marginVertical: 12,
+    },
+    dutyTypeLabel: {
+      color: colors.textSecondary,
+      fontSize: 18,
+      fontWeight: "600",
+      marginBottom: 6,
+    },
+    dropdownButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderWidth: 1,
+      borderColor: colors.borderBlue,
+      borderRadius: 6,
+      backgroundColor: colors.surfaceBlue,
+    },
+    dropdownButtonActive: {
+      borderColor: colors.accentAmber,
+    },
+    dropdownButtonText: {
+      color: colors.blackText,
+      fontSize: 20,
+    },
+    dropdownIcon: {
+      color: colors.textSecondary,
+    },
+    dropdownMenu: {
+      position: "absolute",
+      top: "100%",
+      left: 0,
+      right: 0,
+      marginTop: 4,
+      backgroundColor: colors.surfaceBlue,
+      borderWidth: 1,
+      borderColor: colors.borderBlue,
+      borderRadius: 6,
+      zIndex: 10,
+    },
+    dropdownItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    dropdownItemText: {
+      color: colors.blackText,
+      fontSize: 20,
+    },
     toggleShiftBtn: {
       paddingVertical: 16,
       borderRadius: 8,
       alignItems: "center",
+      marginBottom: 10,
     },
     toggleShiftBtnStart: {
       backgroundColor: colors.accentAmber,
@@ -743,7 +795,7 @@ export const getStyles = (isDark: boolean) => {
     },
     patrolNotificationSub: {
       color: "#FEE2E2",
-      fontSize: 13,
+      fontSize: 16,
     },
     patrolNotificationButtonSos: {
       backgroundColor: "#7F1D1D",

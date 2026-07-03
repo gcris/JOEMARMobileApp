@@ -60,20 +60,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysPermission": "Allow this app to access your location in the background.",
-          "isAndroidBackgroundLocationEnabled": true
-        }
-      ],
-      [
-        "expo-notifications",
-        {
-          "sounds": ["./src/assets/sounds/sos_alert.wav"]
-        }
-      ],
-      [
-        "expo-asset",
-        {
-          "assets": ["./src/assets/sounds/sos_alert.wav"]
+          "locationAlwaysPermission": "Allow this app to access your location even when the app is closed.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ],

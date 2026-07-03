@@ -10,7 +10,6 @@ import {
   Image,
 } from "react-native";
 import Clipboard from "@react-native-clipboard/clipboard";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getStyles, getThemeColors } from "../theme/styles";
 import {
   getOTPAuthUri,
@@ -18,7 +17,6 @@ import {
   verifyMFAChallenge,
 } from "../services/supabaseMFA";
 import { LoginResult, usePatrolState } from "../hooks/usePatrolState";
-import { supabase } from "../services/supabase";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 interface LoginViewProps {
