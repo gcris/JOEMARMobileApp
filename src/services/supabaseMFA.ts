@@ -87,10 +87,6 @@ export const verifyMFAChallenge = async (
         code,
       });
 
-    console.log("factorId: ", factorId);
-    console.log("challengeData.id: ", challengeData.id);
-    console.log("code: ", code);
-
     if (verifyError) {
       console.warn(
         "Supabase MFA Verify challenge failed:",

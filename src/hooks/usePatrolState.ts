@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Alert, Linking, Platform } from "react-native";
 import * as Location from "expo-location";
+import * as BackgroundTracker from "../services/BackgroundTracker";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system";
@@ -15,7 +16,9 @@ import {
   getUnsyncedCount,
   markLogsAsSynced,
   cleanSyncedLogs,
-  insertPersonnelLog,
+  savePatrolLogsToLocalStorage,
+  insertPatrolLogs,
+  syncPendingPatrolLogs,
 } from "../services/database";
 import {
   startBackgroundUpdates,
@@ -81,6 +84,8 @@ export const usePatrolState = () => {
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(false);
+  const SILENT_MODE_KEY = "@pnp_silent_mode";
+  const [isSilentMode, setIsSilentMode] = useState<boolean>(false);
   const [notificationGranted, setNotificationGranted] = useState<
     boolean | null
   >(null);
@@ -154,9 +159,12 @@ export const usePatrolState = () => {
     try {
       setGpsLoading(true);
       await Location.enableNetworkProviderAsync();
-      const enabled = await Location.hasServicesEnabledAsync();
+      let enabled = await Location.hasServicesEnabledAsync();
+      if (!enabled) {
+        enabled = await checkLocationPermissionState();
+      }
       setIsGpsEnabled(enabled);
-      await checkLocationPermissionState();
+      console.log("enableGpsInline:", enabled);
       setGpsLoading(false);
       return enabled;
     } catch (e) {
@@ -191,7 +199,6 @@ export const usePatrolState = () => {
   useEffect(() => {
     if (personnel) {
       // This runs after personnel state has been updated
-      console.log("Personnel is now set:", personnel);
       // Handle post-login logic here
       (async () => {
         const assignedSched = await getScheduleByPersonnel(personnel.id);
@@ -228,6 +235,30 @@ export const usePatrolState = () => {
     };
     loadSettings();
   }, []); // Run once on mount instead of depending on autoSync to prevent infinite loop
+
+  // Load silent mode setting on mount
+  useEffect(() => {
+    const loadSilentMode = async () => {
+      try {
+        const val = await AsyncStorage.getItem("@pnp_silent_mode");
+        if (val !== null) {
+          setIsSilentMode(val === "true");
+        }
+      } catch (e) {
+        console.warn("Failed to load silent mode setting:", e);
+      }
+    };
+    loadSilentMode();
+  }, []); // Run once on mount
+
+  // Set silent mode based on active duty type (optional automatic)
+  useEffect(() => {
+    const isSilent =
+      activeDutyType === "Intel-Driven Operation" ||
+      activeDutyType === "Special Laws";
+    setIsSilentMode(isSilent);
+    AsyncStorage.setItem("@pnp_silent_mode", String(isSilent));
+  }, [activeDutyType]);
 
   // Helper function to check if current time is within any schedule for today
   const checkIfWithinScheduledTime = useCallback(() => {
@@ -366,7 +397,7 @@ export const usePatrolState = () => {
             const {
               data: { user },
               error,
-            } = await supabase.auth.admin.getUserById(activePersonnelId);
+            } = await supabase.auth.getUser();
 
             if (!error && user) {
               // Valid session found, fetch personnel profile
@@ -527,6 +558,16 @@ export const usePatrolState = () => {
       console.warn("Failed to save @pnp_auto_sync", e);
     }
   };
+
+  // const toggleSilentMode = async () => {
+  //   try {
+  //     const nextVal = !isSilentMode;
+  //     setIsSilentMode(nextVal);
+  //     await AsyncStorage.setItem(SILENT_MODE_KEY, String(nextVal));
+  //   } catch (e) {
+  //     console.warn("Failed to save silent mode setting:", e);
+  //   }
+  // };
 
   // Supabase 2FA Settings & check effects
   useEffect(() => {
@@ -699,7 +740,7 @@ export const usePatrolState = () => {
     }
   };
 
-  const completeLogin = async (pUser: Personnel, projectId: string) => {
+  const completeLogin = async (pUser: Personnel, emailInput: string) => {
     // Save state
     setPersonnel(pUser);
 
@@ -724,6 +765,8 @@ export const usePatrolState = () => {
           fcm_token: token,
         })
         .eq("id", pUser.id);
+
+      AsyncStorage.setItem("@pnp_user_name", emailInput);
     } catch (err) {
       console.warn("Unable to update Expo push token", err);
     }
@@ -840,8 +883,6 @@ export const usePatrolState = () => {
 
       const status = await checkMFAStatus(trimmedEmail);
 
-      console.log("MFA Status:", status);
-
       // ------------------------------------------------------------------
       // STEP 6
       // User has no verified MFA
@@ -910,7 +951,7 @@ export const usePatrolState = () => {
       // MFA SUCCESS
       // ------------------------------------------------------------------
 
-      await completeLogin(pUser, projectId);
+      await completeLogin(pUser, emailInput);
 
       return {
         status: "SUCCESS",
@@ -927,9 +968,12 @@ export const usePatrolState = () => {
 
   const logout = useCallback(async () => {
     try {
-      await stopBackgroundUpdates();
+      await BackgroundTracker.stopBackgroundUpdates();
       await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
       await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
+      // CLEAR PATROL STATE WHEN LOGGING OUT
+      await AsyncStorage.removeItem(BackgroundTracker.PATROL_STATE_KEY);
+      await AsyncStorage.removeItem(BackgroundTracker.PATROL_START_TIME_KEY);
     } catch {
       // Ignored for clean sign out
     }
@@ -972,7 +1016,7 @@ export const usePatrolState = () => {
       //   Alert.alert(
       //     "Outside Scheduled Time",
       //     "You can only start patrolling during your scheduled duty hours.\nPlease check your schedule for today.",
-      //     [{ text: "OK", style: "cancel" }],
+      //     [{ text: "OK", style: "cancel" }]
       //   );
       //   return;
       // }
@@ -985,12 +1029,25 @@ export const usePatrolState = () => {
       // Vehicle functionality removed - using personnel only
 
       try {
-        await startBackgroundUpdates(personnel.id);
-        setIsShiftActive(true);
-        Alert.alert(
-          "Patrol Active",
-          "PNP background tracking initialized! Telemetry is captured securely even when minimized.",
-        );
+        await AsyncStorage.setItem("@pnp_active_personnel_id", personnel.id);
+        const started = await BackgroundTracker.startBackgroundUpdates();
+        if (started) {
+          setIsShiftActive(true);
+          // PERSIST PATROL STATE FOR PROCESS RECOVERY
+          await AsyncStorage.setItem(
+            BackgroundTracker.PATROL_STATE_KEY,
+            "true",
+          );
+          await AsyncStorage.setItem(
+            BackgroundTracker.PATROL_START_TIME_KEY,
+            Date.now().toString(),
+          );
+          await AsyncStorage.setItem("@pnp_shift_status", "ACTIVE");
+          // Alert.alert(
+          //   "Patrol Active",
+          //   "PNP background tracking initialized! Telemetry is captured securely even when minimized/closed. ",
+          // );
+        }
       } catch (err: any) {
         Alert.alert(
           "Service Notification",
@@ -1031,7 +1088,6 @@ export const usePatrolState = () => {
           Alert.alert(
             "Sync Error",
             "Supabase is not configured. Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY environment variables to enable data synchronization.",
-            [{ text: "OK", style: "cancel" }],
           );
         }
         setIsSyncing(false);
@@ -1086,10 +1142,7 @@ export const usePatrolState = () => {
           onPress: async () => {
             await cleanSyncedLogs();
             loadLogsAndStats();
-            Alert.alert(
-              "Flushed Data",
-              "Local telemetry memory cleared successfully.",
-            );
+            Alert.alert("Success", "Synced logs cleared from local storage.");
           },
         },
         { text: "Cancel", style: "cancel" },
@@ -1106,7 +1159,73 @@ export const usePatrolState = () => {
       return false;
     }
 
-    return new Promise((resolve) => {
+    // Check if we're in silent mode (no notifications for SOS)
+    const isSilentMode =
+      activeDutyType === "Intel-Driven Operation" ||
+      activeDutyType === "Special Laws";
+
+    if (isSilentMode) {
+      try {
+        // Get current signal strength (still useful for diagnostics)
+        const signal = await SignalStrengthModule.getSignalStrength();
+
+        // Determine duration of shift if available
+        let durationSeconds = 0;
+        try {
+          const startStr = await AsyncStorage.getItem("@pnp_shift_start");
+          if (startStr) {
+            const start = new Date(parseInt(startStr, 10));
+            const now = new Date();
+            durationSeconds = Math.floor(
+              (now.getTime() - start.getTime()) / 1000,
+            );
+          }
+        } catch (e) {
+          console.warn("Could not read shift start time for duration", e);
+        }
+
+        const captured = formatManilaTimestamp(isShiftActive);
+        let shiftWasActive = isShiftActive;
+        if (shiftWasActive) {
+          setIsShiftActive(false);
+          await AsyncStorage.removeItem("@pnp_shift_status");
+        }
+        const uniqueId = "sos-" + Math.random().toString(36).substring(2, 11);
+
+        // In silent mode, we store a log with duty type set to the selected silent mode
+        // and zeroed location to indicate no GPS was recorded.
+        const sosLog: PersonnelLog = {
+          id: uniqueId,
+          personnelId: personnel.id,
+          personnel: {
+            rank_name: personnel.rank?.rank_name || "",
+            fullname: personnel.fullname,
+          },
+          latitude: 0, // No GPS stored in silent mode
+          longitude: 0, // No GPS stored in silent mode
+          speed: 0,
+          networkSignal: signal.level,
+          dutyType: activeDutyType, // Preserve the selected silent duty type
+          capturedAt: captured,
+          isSynced: false,
+        };
+        // If the database schema supports a duration field, attach it.
+        // Assuming the backend accepts extra fields; otherwise, adjust schema accordingly.
+        (sosLog as any).durationSeconds = durationSeconds;
+
+        await insertPatrolLogs([sosLog]);
+        await updateUnsyncedCounter();
+        await loadLogsAndStats();
+
+        return true;
+      } catch (err: any) {
+        console.error(err);
+        return false;
+      }
+    }
+
+    // Normal mode: show confirmation, then send SOS with GPS
+    return new Promise<boolean>((resolve) => {
       Alert.alert(
         "DISTRESS SIGNAL",
         "This will immediately send an emergency alert with your live GPS location back to INPPO HQ and notify your unit/station members. Are you sure you want to trigger it?",
@@ -1132,6 +1251,7 @@ export const usePatrolState = () => {
                     const { status } =
                       await Location.requestForegroundPermissionsAsync();
                     if (status !== Location.PermissionStatus.GRANTED) {
+                      resolve(false);
                       return;
                     }
                   }
@@ -1175,16 +1295,17 @@ export const usePatrolState = () => {
                   latitude: lat,
                   longitude: lng,
                   speed: speed, // Special speed indicator for SOS alert
-                  networkSignal: signal.level, // Signal strength for SOS
+                  networkSignal: signal.level, // Fixing the typo in signal.level assignment
                   dutyType: "EMERGENCY_SOS", // Special duty type for SOS
                   capturedAt: captured,
                   isSynced: false, // Initially not synced
                 };
 
-                await insertPersonnelLog(sosLog);
+                await insertPatrolLogs([sosLog]);
                 await updateUnsyncedCounter();
                 await loadLogsAndStats();
 
+                // Only show success alert if not in silent mode
                 Alert.alert(
                   "DISTRESS SIGNAL SENT",
                   `Your unit/station members have been notified with your location.\nPlease stay at your position or proceed to the safe area.`,
@@ -1352,7 +1473,9 @@ export const usePatrolState = () => {
     openSystemSettings,
     triggerEmergencySOS,
     toggleAutoSync,
+    // toggleSilentMode,
     is2FAEnabled,
+    // isSilentMode,
     enable2FA,
     disable2FA,
     requestForegroundPermission,

@@ -38,8 +38,10 @@ async function sendFCM(
     message: {
       token: fcmToken,
 
+      priority: "high",
+
       android: {
-        priority: "HIGH",
+        priority: "high",
       },
 
       data: {

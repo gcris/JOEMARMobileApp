@@ -1,0 +1,431 @@
+import { supabase, isSupabaseConfigured } from "./supabase";
+import { Personnel, Schedule, PersonnelLog } from "../types";
+import * as SQLite from 'expo-sqlite';
+import { AppState } from "react-native";
+
+// Database setup
+let db: SQLite.SQLiteDatabase | null = null;
+
+const getDB = () => {
+  if (!db) {
+    db = SQLite.openDatabase('patrol.db');
+    // Initialize table
+    db.transaction(tx => {
+      tx.executeSql(
+        `CREATE TABLE IF NOT EXISTS patrol_logs (
+          id TEXT PRIMARY KEY,
+          personnelId TEXT,
+          latitude REAL,
+          longitude REAL,
+          speed REAL,
+          networkSignal INTEGER,
+          dutyType TEXT,
+          capturedAt TEXT,
+          isSynced INTEGER
+        );`
+      );
+    });
+  }
+  return db;
+};
+
+// Helper function to execute SQL and return a promise
+const executeSql = (sql: string, params: any[] = []): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    const database = getDB();
+    database.transaction(tx => {
+      tx.executeSql(
+        sql,
+        params,
+        (_, result) => {
+          resolve(result);
+        },
+        (_, error) => {
+          reject(error);
+        }
+      );
+    });
+  });
+};
+
+// --- Personnel Operations ---
+export const getPersonnelByBadge = async (
+  badgeNumber: string,
+): Promise<Personnel | null> => {
+  try {
+    const { data, error } = await supabase
+      .from("personnel")
+      .select("*, rank(*), unit(*), schedule_assignments(*)")
+      .eq("badge_number", badgeNumber)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      // PGRST116 means no rows returned
+      throw error;
+    }
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      badgeNumber: data.badge_number,
+      rank: data.rank,
+      rankId: data.rank_id,
+      fullname: data.fullname,
+      unitId: data.unit_id,
+      unit: data.unit,
+      designation: data.designation,
+      phoneNumber: data.phone_number,
+      viberNumber: data.viber_number,
+      isApproved: data.is_approved,
+      role: data.role,
+      email: data.email,
+      photo_url: data.photo_url, // Add photo URL
+      fcm_token: data.fcm_token,
+    };
+  } catch (error) {
+    console.error("Error fetching personnel by badge:", error);
+    return null;
+  }
+};
+
+export const getPersonnelByEmail = async (
+  email: string,
+): Promise<Personnel | null> => {
+  try {
+    const { data, error } = await supabase
+      .from("personnel")
+      .select("*, rank(*), unit(*), schedule_assignments(*)")
+      .eq("email", email.toLowerCase())
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      throw error;
+    }
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      badgeNumber: data.badge_number,
+      rank: data.rank,
+      rankId: data.rank_id,
+      fullname: data.fullname,
+      unitId: data.unit_id,
+      unit: data.unit,
+      designation: data.designation,
+      phoneNumber: data.phone_number,
+      viberNumber: data.viber_number,
+      isApproved: data.is_approved,
+      role: data.role,
+      email: data.email,
+      photo_url: data.photo_url, // Add photo URL
+      fcm_token: data.fcm_token,
+    };
+  } catch (error) {
+    console.error("Error fetching personnel by email:", error);
+    return null;
+  }
+};
+
+export const findCandidatePersonnel = async (
+  badgeNumber: string,
+  rankId: string,
+  unitId: string,
+  designation: string,
+): Promise<Personnel | null> => {
+  try {
+    const { data, error } = await supabase
+      .from("personnel")
+      .select("*")
+      .eq("badge_number", badgeNumber.toUpperCase())
+      .eq("rank_id", rankId)
+      .eq("unit_id", unitId)
+      .ilike("designation", `%${designation}%`)
+      .single();
+
+    console.log(badgeNumber, rankId, unitId, designation);
+
+    if (error && error.code !== "PGRST116") {
+      throw error;
+    }
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      badgeNumber: data.badge_number,
+      rank: data.rank,
+      rankId: data.rank_id,
+      fullname: data.fullname,
+      unitId: data.unit_id,
+      unit: data.unit,
+      designation: data.designation,
+      phoneNumber: data.phone_number,
+      viberNumber: data.viber_number,
+      isApproved: data.is_approved,
+      role: true,
+      photo_url: data.photo_url, // Add photo URL
+      fcm_token: data.fcm_token,
+    };
+  } catch (error) {
+    console.error("Error finding candidate personnel:", error);
+    return null;
+  }
+};
+
+export const getPersonnelById = async (
+  id: string,
+): Promise<Personnel | null> => {
+  try {
+    const { data, error } = await supabase
+      .from("personnel")
+      .select("*, rank(*), unit(*), schedule_assignments(*)")
+      .eq("id", id)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      throw error;
+    }
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      badgeNumber: data.badge_number,
+      rank: data.rank,
+      rankId: data.rank_id,
+      fullname: data.fullname,
+      unitId: data.unit_id,
+      unit: data.unit,
+      designation: data.designation,
+      phoneNumber: data.phone_number,
+      viberNumber: data.viber_number,
+      isApproved: data.is_approved,
+      role: data.role,
+      email: data.email,
+      photo_url: data.photo_url, // Add photo URL
+      fcm_token: data.fcm_token,
+    };
+  } catch (error) {
+    console.error("Error fetching personnel by id:", error);
+    return null;
+  }
+};
+
+// --- Schedule Operations ---
+export const getSchedulesByUnitId = async (
+  unitId: string,
+): Promise<Schedule[]> => {
+  try {
+    const { data, error } = await supabase
+      .from("schedules")
+      .select("*")
+      .eq("unit_id", unitId);
+
+    if (error) throw error;
+
+    return data.map(schedule => ({
+      id: schedule.id,
+      unitId: schedule.unit_id,
+      startTime: schedule.start_time,
+      endTime: schedule.end_time,
+      dayOfWeek: schedule.day_of_week,
+      type: schedule.type,
+    }));
+  } catch (error) {
+    console.error("Error fetching schedules by unit id:", error);
+    return [];
+  }
+};
+
+// --- Patrol Log Operations (SQLite) ---
+export const savePatrolLogsToLocalStorage = async (
+  log: PersonnelLog,
+): Promise<void> => {
+  try {
+    // If Supabase is configured and we are online, try to save to Supabase first
+    if (isSupabaseConfigured()) {
+      try {
+        const { error } = await supabase.from("patrol_logs").insert([log]);
+        if (!error) {
+          // Successfully saved to Supabase, no need to store locally
+          return;
+        }
+        // If there was an error, fall back to local storage
+        console.warn("Failed to save to Supabase, falling back to local storage:", error);
+      } catch (error) {
+        console.warn("Error saving to Supabase, falling back to local storage:", error);
+      }
+    }
+
+    // Fallback to local SQLite storage
+    const db = getDB();
+    db.transaction(tx => {
+      tx.executeSql(
+        `INSERT INTO patrol_logs (
+          id, personnelId, latitude, longitude, speed, networkSignal, dutyType, capturedAt, isSynced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        [
+          log.id,
+          log.personnelId,
+          log.latitude,
+          log.longitude,
+          log.speed,
+          log.networkSignal,
+          log.dutyType,
+          log.capturedAt,
+          log.isSynced ? 1 : 0,
+        ]
+      );
+    });
+  } catch (err) {
+    console.error("[Database] Error saving patrol log to local storage:", err);
+  }
+};
+
+export const syncPendingPatrolLogs = async (): Promise<boolean> => {
+  if (!isSupabaseConfigured()) {
+    console.log("[Database] Supabase not configured, skipping sync");
+    return false;
+  }
+
+  try {
+    const db = getDB();
+    const logsResult = await executeSql(
+      "SELECT * FROM patrol_logs WHERE isSynced = 0;"
+    );
+
+    const logs = logsResult.rows._array as PersonnelLog[];
+
+    if (logs.length === 0) {
+      console.log("[Database] No pending logs to sync");
+      return true;
+    }
+
+    console.log(`[Database] Syncing ${logs.length} patrol logs to Supabase`);
+
+    // Attempt to insert all logs into Supabase
+    const { error } = await supabase.from("patrol_logs").insert(logs);
+
+    if (error) {
+      console.error("[Database] Error syncing patrol logs to Supabase:", error);
+      return false;
+    }
+
+    // Mark logs as synced in SQLite
+    const ids = logs.map(log => log.id);
+    const placeholders = ids.map(() => "?").join(",");
+    const updateSql = `UPDATE patrol_logs SET isSynced = 1 WHERE id IN (${placeholders});`;
+
+    await executeSql(updateSql, ids);
+
+    console.log(`[Database] Successfully synced and marked ${logs and marked as synced`);
+    return true;
+  } catch (err) {
+    console.error("[Database] Error syncing patrol logs:", err);
+    return false;
+  }
+};
+
+export const getUnsyncedLogs = async (): Promise<PersonnelLog[]> => {
+  try {
+    const db = getDB();
+    const result = await executeSql(
+      "SELECT * FROM patrol_logs WHERE isSynced = 0;"
+    );
+    return result.rows._array as PersonnelLog[];
+  } catch (err) {
+    console.error("[Database] Error getting unsynced logs:", err);
+    return [];
+  }
+};
+
+export const getLatestLogs = async (): Promise<PersonnelLog[]> => {
+  try {
+    // Get logs from Supabase (if configured and online)
+    let supabaseLogs: PersonnelLog[] = [];
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from("patrol_logs")
+          .select("*")
+          .order("capturedAt", { ascending: false });
+
+        if (!error && data) {
+          supabaseLogs = data as PersonnelLog[];
+        }
+      } catch (error) {
+        console.warn("Error fetching logs from Supabase:", error);
+      }
+    }
+
+    // Get logs from local SQLite
+    const db = getDB();
+    const localResult = await executeSql(
+      "SELECT * FROM patrol_logs ORDER BY capturedAt DESC;"
+    );
+    const localLogs = localResult.rows._array as PersonnelLog[];
+
+    // Combine and deduplicate by id (prefer Supabase version if exists)
+    const combinedMap = new Map<string, PersonnelLog>();
+    localLogs.forEach(log => {
+      combinedMap.set(log.id, log);
+    });
+    supabaseLogs.forEach(log => {
+      combinedMap.set(log.id, log); // Supabase version overwrites local
+    });
+
+    const combinedLogs = Array.from(combinedMap.values());
+    // Sort by capturedAt descending
+    combinedLogs.sort((a, b) =>
+      new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime()
+    );
+
+    return combinedLogs;
+  } catch (err) {
+    console.error("[Database] Error getting latest logs:", err);
+    return [];
+  }
+};
+
+export const getUnsyncedCount = async (): Promise<number> => {
+  try {
+    const db = getDB();
+    const result = await executeSql(
+      "SELECT COUNT(*) as count FROM patrol_logs WHERE isSynced = 0;"
+    );
+    return result.rows.item(0).count;
+  } catch (err) {
+    console.error("[Database] Error getting unsynced count:", err);
+    return 0;
+  }
+};
+
+export const markLogsAsSynced = async (ids: string[]): Promise<void> => {
+  try {
+    if (ids.length === 0) return;
+
+    const db = getDB();
+    const placeholders = ids.map(() => "?").join(",");
+    const sql = `UPDATE patrol_logs SET isSynced = 1 WHERE id IN (${placeholders});`;
+
+    await executeSql(sql, ids);
+  } catch (err) {
+    console.error("[Database] Error marking logs as synced:", err);
+  }
+};
+
+export const cleanSyncedLogs = async (): Promise<void> => {
+  try {
+    const db = getDB();
+    await executeSql("DELETE FROM patrol_logs WHERE isSynced = 1;");
+  } catch (err) {
+    console.error("[Database] Error cleaning synced logs:", err);
+  }
+};
+
+// --- Other AsyncStorage Operations (kept as is) ---
+
+// Note: Other AsyncStorage usages in BackgroundTracker.ts and App.tsx remain unchanged.
+// This file only handles patrol log storage migration to SQLite.

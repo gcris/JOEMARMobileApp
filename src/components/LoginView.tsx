@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { NativeModules, Button } from "react-native";
 import {
   View,
   Text,
@@ -18,7 +19,11 @@ import {
 } from "../services/supabaseMFA";
 import { LoginResult, usePatrolState } from "../hooks/usePatrolState";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { PermissionView } from "../helper/PermissionView";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Location from "expo-location";
 
+const { PatrolService } = NativeModules;
 interface LoginViewProps {
   isGpsEnabled: boolean;
   gpsLoading: boolean;
@@ -100,6 +105,21 @@ export const LoginView = ({
   const [mfaSetupCode, setMfaSetupCode] = useState<string>("");
   const [mfaSetupLoading, setMfaSetupLoading] = useState(false);
   const [mfaFactorId, setMfaFactorId] = useState<string>("");
+
+  useEffect(() => {
+    const loadSavedEmail = async () => {
+      try {
+        const savedEmail = await AsyncStorage.getItem("@pnp_user_name");
+        if (savedEmail !== null) {
+          setEmail(savedEmail);
+        }
+      } catch (error) {
+        console.error("Failed to load the user name from storage", error);
+      }
+    };
+
+    loadSavedEmail();
+  }, []);
 
   const handleSubmit = async () => {
     setLoading(false);
@@ -644,195 +664,18 @@ export const LoginView = ({
         <View style={{ height: 32 }} />
 
         {/* ACCESS SYSTEM STATUS PANEL */}
-        {(foregroundGranted === false ||
-          backgroundGranted === false ||
-          !isGpsEnabled) && (
-          <View
-            style={{
-              width: "100%",
-              backgroundColor: isDarkTheme ? "#1E293B" : "#F1F5F9",
-              borderWidth: 1,
-              borderColor: "#EF4444",
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 16,
-            }}
-          >
-            <Text
-              style={{
-                color: "#EF4444",
-                fontWeight: "bold",
-                fontSize: 20,
-                textAlign: "center",
-                marginBottom: 8,
-              }}
-            >
-              PHONE PERMISSIONS
-            </Text>
-            <Text
-              style={{
-                color: isDarkTheme ? "#94A3B8" : "#475569",
-                fontSize: 15,
-                textAlign: "center",
-                marginBottom: 12,
-                lineHeight: 16,
-              }}
-            >
-              INPPO Patrol Tracker requires active security clearances. Please
-              grant these permissions below.
-            </Text>
-
-            {/* Foreground GPS */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 6,
-                borderBottomWidth: 1,
-                borderColor: isDarkTheme
-                  ? "rgba(255,255,255,0.05)"
-                  : "rgba(0,0,0,0.05)",
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    fontSize: 20,
-                    fontWeight: "bold",
-                    color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                  }}
-                >
-                  1. Location Access {foregroundGranted ? "✅" : "❌"}
-                </Text>
-              </View>
-              {!foregroundGranted && (
-                <TouchableOpacity
-                  onPress={onRequestForeground}
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 6,
-                    paddingHorizontal: 12,
-                    borderRadius: 6,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontWeight: "bold",
-                      fontSize: 15,
-                    }}
-                  >
-                    ENABLE
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Background Location */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 6,
-                borderBottomWidth: 1,
-                borderColor: isDarkTheme
-                  ? "rgba(255,255,255,0.05)"
-                  : "rgba(0,0,0,0.05)",
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    fontSize: 20,
-                    fontWeight: "bold",
-                    color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                  }}
-                >
-                  2. Background Location Access{" "}
-                  {backgroundGranted ? "✅" : "❌"}
-                </Text>
-              </View>
-              {foregroundGranted && !backgroundGranted && (
-                <TouchableOpacity
-                  onPress={onRequestBackground}
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 6,
-                    paddingHorizontal: 12,
-                    borderRadius: 6,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontWeight: "bold",
-                      fontSize: 15,
-                    }}
-                  >
-                    ENABLE
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* System GPS */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 6,
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    fontSize: 20,
-                    fontWeight: "bold",
-                    color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                  }}
-                >
-                  3. Enable Location {isGpsEnabled ? "✅" : "❌"}
-                </Text>
-              </View>
-              {!isGpsEnabled && (
-                <TouchableOpacity
-                  onPress={async () => {
-                    const gpsOn = await onEnableGpsInline();
-                    if (!gpsOn) {
-                      Alert.alert(
-                        "Permission Fallback",
-                        "Could not auto-enable device location. Please configure it via the device system settings.",
-                        [
-                          { text: "Open Settings", onPress: onOpenSettings },
-                          { text: "Cancel", style: "cancel" },
-                        ],
-                      );
-                    }
-                  }}
-                  disabled={gpsLoading}
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 6,
-                    paddingHorizontal: 12,
-                    borderRadius: 6,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontWeight: "bold",
-                      fontSize: 15,
-                    }}
-                  >
-                    {gpsLoading ? "Initializing..." : "ENABLE"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+        {(!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
+          <PermissionView
+            foregroundGranted={foregroundGranted}
+            backgroundGranted={backgroundGranted}
+            isGpsEnabled={isGpsEnabled}
+            isDarkTheme={isDarkTheme}
+            onRequestForeground={onRequestForeground}
+            onRequestBackground={onRequestBackground}
+            onEnableGpsInline={onEnableGpsInline}
+            onOpenSettings={onOpenSettings}
+            gpsLoading={gpsLoading}
+          />
         )}
 
         {notFoundState && (
@@ -1080,15 +923,15 @@ export const LoginView = ({
                 </Text>
               </TouchableOpacity>
             </View>
-            <View
+            {/* <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 marginBottom: 15,
                 justifyContent: "space-between",
               }}
-            >
-              <View
+            > */}
+            {/* <View
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -1133,10 +976,10 @@ export const LoginView = ({
                 >
                   Remember me
                 </Text>
-              </View>
+              </View> */}
 
-              {/* Forgot Password Link */}
-              {onForgotPassword && (
+            {/* Forgot Password Link */}
+            {/* {onForgotPassword && (
                 <TouchableOpacity onPress={onForgotPassword}>
                   <Text
                     style={{
@@ -1148,8 +991,8 @@ export const LoginView = ({
                     Forgot Password?
                   </Text>
                 </TouchableOpacity>
-              )}
-            </View>
+              )} */}
+            {/* </View> */}
 
             <TouchableOpacity
               style={{
@@ -1178,6 +1021,39 @@ export const LoginView = ({
                   Sign in
                 </Text>
               )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                backgroundColor: isDarkTheme ? "#4afa15" : "#1E3A8A",
+                borderRadius: 12,
+                height: 50,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+              onPress={async () => {
+                try {
+                  const fg = await Location.getForegroundPermissionsAsync();
+                  const bg = await Location.getBackgroundPermissionsAsync();
+
+                  console.log(fg);
+                  console.log(bg);
+
+                  // const result = await PatrolService.startPatrol();
+                  // console.log("Service started:", result);
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+            >
+              <Text
+                style={{
+                  color: isDarkTheme ? "#0B121F" : "#FFFFFF",
+                  fontWeight: "bold",
+                  fontSize: 20,
+                }}
+              >
+                This is a test
+              </Text>
             </TouchableOpacity>
 
             {onGoToRegister && (

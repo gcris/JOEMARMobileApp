@@ -76,7 +76,7 @@ export const getStyles = (isDark: boolean) => {
       textAlign: "center",
     },
     scrollContent: {
-      padding: 20,
+      padding: 10,
       paddingBottom: 40,
     },
     headerSpacer: {

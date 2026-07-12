@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { supabase } from "../services/supabase";
 import { getPersonnelById, savePersonnel } from "../services/database";
+import { usePatrolState } from "../hooks/usePatrolState";
 
 // Fix: Removed the problematic import from '../../types'
 // and replaced with proper navigation types
@@ -66,6 +67,7 @@ export const AccountScreen = ({
     useState<boolean>(false);
   const [showChangePassword, setShowChangePassword] = useState<boolean>(false);
   const [isChangingPassword, setIsChangingPassword] = useState<boolean>(false);
+  // const { isSilentMode, toggleSilentMode } = usePatrolState();
 
   // Load personnel data
   useEffect(() => {
@@ -80,12 +82,7 @@ export const AccountScreen = ({
           setViberNumber(personnelData.viberNumber || "");
           setBadgeNumber(personnelData.badgeNumber || "");
           setDesignation(personnelData.designation || "");
-          setRank(
-            personnelData.rank?.rank_name +
-              " (" +
-              personnelData.rank?.description +
-              ")" || "",
-          ); // Add rank loading
+          setRank(personnelData.rank?.description || ""); // Add rank loading
           setPhotoUrl(personnelData.photo_url || null);
           setOldPhotoUrl(personnelData.photo_url || null);
         }
@@ -323,7 +320,6 @@ export const AccountScreen = ({
           Edit your profile information
         </Text>
       </View>
-
       {/* Change Password Button */}
       <TouchableOpacity
         onPress={() => setShowChangePassword(true)}
@@ -339,7 +335,21 @@ export const AccountScreen = ({
           Change Password
         </Text>
       </TouchableOpacity>
-
+      {/* Silent Mode Button */}
+      {/* <TouchableOpacity
+        onPress={toggleSilentMode}
+        style={[styles.submitBtn, { marginHorizontal: 20, marginBottom: 10 }]}
+      >
+        <Text
+          style={{
+            fontSize: 22,
+            fontWeight: "bold",
+            color: isDarkTheme ? "#000000" : "#FFFFFF",
+          }}
+        > */}
+      {/*isSilentMode ? "Disable Silent Mode" : "Enable Silent Mode"*/}
+      {/* </Text>
+      </TouchableOpacity> */}
       {/* Form Fields */}
       <View>
         {/* Profile Picture Section */}
@@ -544,7 +554,6 @@ export const AccountScreen = ({
           />
         </View>
       </View>
-
       {/* Save Button */}
       {/* FIXED: Changed from styles.buttonPrimary to styles.submitBtn (which exists) */}
       <TouchableOpacity
@@ -569,7 +578,6 @@ export const AccountScreen = ({
           </Text>
         )}
       </TouchableOpacity>
-
       {/* Cancel Button */}
       <TouchableOpacity style={{ marginHorizontal: 20 }} onPress={onClose}>
         <Text
@@ -583,7 +591,6 @@ export const AccountScreen = ({
           Cancel
         </Text>
       </TouchableOpacity>
-
       {/* Change Password Modal */}
       {showChangePassword && (
         <View

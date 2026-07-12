@@ -95,8 +95,6 @@ export const ForgotPasswordScreen = ({
     // Navigate back to login screen
     if (onBack) {
       onBack();
-    } else if (navigation) {
-      // navigation.goBack();
     }
   };
 
@@ -194,7 +192,7 @@ export const ForgotPasswordScreen = ({
             width: 1,
             height: "100%",
             backgroundColor: isDarkTheme
-              ? "rgba(20,32,53,0.2)"
+              ? "rgba(8, 9, 11, 0.2)"
               : "rgba(148,163,184,0.2)",
           }}
         />

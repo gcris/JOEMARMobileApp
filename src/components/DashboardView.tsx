@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -14,15 +14,21 @@ import { Personnel, PersonnelLog, Schedule } from "../types";
 import { getStyles, getThemeColors } from "../theme/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import FontAwesome from "@expo/vector-icons/FontAwesome6";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { PermissionView } from "../helper/PermissionView";
 
 const DUTY_TYPES = [
   "Foot Patrol",
   "Mobile Patrol",
+  "TMRU Patrol",
   "Bike Patrol",
   "Seaborne Patrol",
   "Checkpoint",
   "Special Event",
   "Simulation Exercise",
+  "DODON",
+  "Intel-Driven Operation",
+  "Special Laws",
 ];
 
 interface DashboardViewProps {
@@ -67,18 +73,11 @@ export const DashboardView = ({
   isShiftActive,
   isGpsEnabled,
   unsyncedCount,
-  logs,
   isSyncing,
   onToggleShift,
   onSync,
   onOpenSettings,
   onEmergencySOS,
-  onClearCache,
-  autoSync,
-  onToggleAutoSync,
-  is2FAEnabled,
-  onEnable2FA,
-  onDisable2FA,
   isDarkTheme,
   foregroundGranted,
   backgroundGranted,
@@ -99,6 +98,28 @@ export const DashboardView = ({
   const [selectedDutyType, setSelectedDutyType] =
     useState<string>("Foot Patrol");
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
+
+  useEffect(() => {
+    // 1. Declare the async function inside the hook
+    const loadDutyType = async () => {
+      try {
+        const duty = await AsyncStorage.getItem("@pnp_duty_type");
+        //const isShiftActive = await AsyncStorage.getItem("@pnp_shift_status");
+        if (duty) {
+          setSelectedDutyType(duty);
+        }
+
+        // if (isShiftActive! === "ACTIVE") {
+        //   onToggleShift();
+        // }
+      } catch (error) {
+        console.error("Failed to load duty type from storage:", error);
+      }
+    };
+
+    // 2. Call it immediately
+    loadDutyType();
+  }, []);
 
   const handlePhoneCall = (phoneNumber: string) => {
     if (!phoneNumber) return;
@@ -152,195 +173,18 @@ export const DashboardView = ({
         keyboardShouldPersistTaps="handled"
       >
         {/* ACCESS SYSTEM STATUS PANEL */}
-        {(foregroundGranted === false ||
-          backgroundGranted === false ||
-          !isGpsEnabled) && (
-          <View
-            style={{
-              backgroundColor: isDarkTheme ? "#1E293B" : "#F1F5F9",
-              borderWidth: 1,
-              borderColor: "#EF4444",
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 16,
-              // marginVertical: 12,
-              // marginHorizontal: 16,
-            }}
-          >
-            <Text
-              style={{
-                color: "#EF4444",
-                fontWeight: "bold",
-                fontSize: 20,
-                textAlign: "center",
-                marginBottom: 4,
-              }}
-            >
-              PHONE PERMISSIONS
-            </Text>
-            <Text
-              style={{
-                color: isDarkTheme ? "#94A3B8" : "#475569",
-                fontSize: 15,
-                textAlign: "center",
-                marginBottom: 12,
-                lineHeight: 16,
-              }}
-            >
-              INPPO Patrol Tracker requires active security clearances. Please
-              grant these permissions below.
-            </Text>
-
-            {/* Foreground */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 5,
-                borderBottomWidth: 1,
-                borderColor: isDarkTheme
-                  ? "rgba(255,255,255,0.05)"
-                  : "rgba(0,0,0,0.05)",
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    fontSize: 20,
-                    fontWeight: "bold",
-                    color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                  }}
-                >
-                  1. Location Access {foregroundGranted ? "✅" : "❌"}
-                </Text>
-              </View>
-              {!foregroundGranted && (
-                <TouchableOpacity
-                  onPress={onRequestForeground}
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 4,
-                    paddingHorizontal: 10,
-                    borderRadius: 5,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontWeight: "bold",
-                      fontSize: 15,
-                    }}
-                  >
-                    ACTIVATE
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Background */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 5,
-                borderBottomWidth: 1,
-                borderColor: isDarkTheme
-                  ? "rgba(255,255,255,0.05)"
-                  : "rgba(0,0,0,0.05)",
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    fontSize: 20,
-                    fontWeight: "bold",
-                    color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                  }}
-                >
-                  2. Background Location Access{" "}
-                  {backgroundGranted ? "✅" : "❌"}
-                </Text>
-              </View>
-              {foregroundGranted && !backgroundGranted && (
-                <TouchableOpacity
-                  onPress={onRequestBackground}
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 4,
-                    paddingHorizontal: 10,
-                    borderRadius: 5,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontWeight: "bold",
-                      fontSize: 15,
-                    }}
-                  >
-                    ENABLE
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* GPS Services */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 5,
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    fontSize: 20,
-                    fontWeight: "bold",
-                    color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                  }}
-                >
-                  3. Enable Location {isGpsEnabled ? "✅" : "❌"}
-                </Text>
-              </View>
-              {!isGpsEnabled && (
-                <TouchableOpacity
-                  onPress={async () => {
-                    const resolved = await onEnableGpsInline();
-                    if (!resolved) {
-                      Alert.alert(
-                        "GPS Action Required",
-                        "Could not auto-toggle device location services. Please configure GPS via system settings.",
-                        [
-                          { text: "Open settings", onPress: onOpenSettings },
-                          { text: "Cancel", style: "cancel" },
-                        ],
-                      );
-                    }
-                  }}
-                  style={{
-                    backgroundColor: "#EF4444",
-                    paddingVertical: 4,
-                    paddingHorizontal: 10,
-                    borderRadius: 5,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontWeight: "bold",
-                      fontSize: 15,
-                    }}
-                  >
-                    ENABLE
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+        {(!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
+          <PermissionView
+            foregroundGranted={foregroundGranted}
+            backgroundGranted={backgroundGranted}
+            isGpsEnabled={isGpsEnabled}
+            isDarkTheme={isDarkTheme}
+            onRequestForeground={onRequestForeground}
+            onRequestBackground={onRequestBackground}
+            onEnableGpsInline={onEnableGpsInline}
+            onOpenSettings={onOpenSettings}
+            gpsLoading={false}
+          />
         )}
 
         {/* OFFICER PROFILE CARD */}
