@@ -21,9 +21,7 @@ import { LoginResult, usePatrolState } from "../hooks/usePatrolState";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { PermissionView } from "../helper/PermissionView";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Location from "expo-location";
 
-const { PatrolService } = NativeModules;
 interface LoginViewProps {
   isGpsEnabled: boolean;
   gpsLoading: boolean;
@@ -979,19 +977,19 @@ export const LoginView = ({
               </View> */}
 
             {/* Forgot Password Link */}
-            {/* {onForgotPassword && (
-                <TouchableOpacity onPress={onForgotPassword}>
-                  <Text
-                    style={{
-                      fontSize: 18,
-                      color: isDarkTheme ? "#FACC15" : "#1E3A8A",
-                      textDecorationLine: "underline",
-                    }}
-                  >
-                    Forgot Password?
-                  </Text>
-                </TouchableOpacity>
-              )} */}
+            {onForgotPassword && (
+              <TouchableOpacity onPress={onForgotPassword}>
+                <Text
+                  style={{
+                    fontSize: 18,
+                    color: isDarkTheme ? "#FACC15" : "#1E3A8A",
+                    textDecorationLine: "underline",
+                  }}
+                >
+                  Forgot Password?
+                </Text>
+              </TouchableOpacity>
+            )}
             {/* </View> */}
 
             <TouchableOpacity
@@ -1021,39 +1019,6 @@ export const LoginView = ({
                   Sign in
                 </Text>
               )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{
-                backgroundColor: isDarkTheme ? "#4afa15" : "#1E3A8A",
-                borderRadius: 12,
-                height: 50,
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-              onPress={async () => {
-                try {
-                  const fg = await Location.getForegroundPermissionsAsync();
-                  const bg = await Location.getBackgroundPermissionsAsync();
-
-                  console.log(fg);
-                  console.log(bg);
-
-                  // const result = await PatrolService.startPatrol();
-                  // console.log("Service started:", result);
-                } catch (e) {
-                  console.error(e);
-                }
-              }}
-            >
-              <Text
-                style={{
-                  color: isDarkTheme ? "#0B121F" : "#FFFFFF",
-                  fontWeight: "bold",
-                  fontSize: 20,
-                }}
-              >
-                This is a test
-              </Text>
             </TouchableOpacity>
 
             {onGoToRegister && (

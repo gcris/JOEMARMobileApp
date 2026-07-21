@@ -16,11 +16,9 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { supabase } from "../services/supabase";
 import { getPersonnelById, savePersonnel } from "../services/database";
-import { usePatrolState } from "../hooks/usePatrolState";
 
 // Fix: Removed the problematic import from '../../types'
 // and replaced with proper navigation types
-import type { RootStackParamList } from "../types/index";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { decode } from "base64-arraybuffer";
 

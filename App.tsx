@@ -65,13 +65,13 @@ export default function App() {
 
       try {
         // Import BackgroundTracker here to avoid circular dependency issues
-        const BackgroundTracker =
-          await import("./src/services/BackgroundTracker");
+        const PATROL_STATE_KEY = "@pnp_patrol_active";
+        const PATROL_START_TIME_KEY = "@pnp_patrol_start_time";
+        const LAST_KNOWN_LOCATION_KEY = "@pnp_last_known_location";
 
         // Check if patrol should be active (survives process recreation)
         const patrolActive =
-          (await AsyncStorage.getItem(BackgroundTracker.PATROL_STATE_KEY)) ===
-          "true";
+          (await AsyncStorage.getItem(PATROL_STATE_KEY)) === "true";
 
         console.log("[App] Patrol active from storage:", patrolActive);
 
@@ -80,11 +80,9 @@ export default function App() {
           const personnelId = await AsyncStorage.getItem(
             "@pnp_active_personnel_id",
           );
-          const startTime = await AsyncStorage.getItem(
-            BackgroundTracker.PATROL_START_TIME_KEY,
-          );
+          const startTime = await AsyncStorage.getItem(PATROL_START_TIME_KEY);
           const lastLocationJson = await AsyncStorage.getItem(
-            BackgroundTracker.LAST_KNOWN_LOCATION_KEY,
+            LAST_KNOWN_LOCATION_KEY,
           );
 
           // Update patrol state if we have personnel ID
@@ -94,19 +92,19 @@ export default function App() {
             console.log("[App] Last known location:", lastLocationJson);
 
             // Verify location tracking is still active
-            const started = await Location.hasStartedLocationUpdatesAsync(
-              BackgroundTracker.LOCATION_TASK_NAME,
-            );
+            // const started = await Location.hasStartedLocationUpdatesAsync(
+            //   BackgroundTracker.LOCATION_TASK_NAME,
+            // );
 
-            if (!started) {
-              // Restart tracking if it was interrupted by process kill
-              console.log(
-                "[App] Restarting location tracking after process restore",
-              );
-              await BackgroundTracker.startBackgroundUpdates();
-            } else {
-              console.log("[App] Location tracking already active");
-            }
+            // if (!started) {
+            //   // Restart tracking if it was interrupted by process kill
+            //   console.log(
+            //     "[App] Restarting location tracking after process restore",
+            //   );
+            //   await BackgroundTracker.startBackgroundUpdates();
+            // } else {
+            //   console.log("[App] Location tracking already active");
+            // }
           }
         }
       } catch (error) {
@@ -271,16 +269,15 @@ function MainApp({
   const {
     personnel,
     schedule,
-    isShiftActive,
+    patrolStatus,
     isGpsEnabled,
     foregroundGranted,
     backgroundGranted,
     unsyncedCount,
-    logs,
     isSyncing,
+    isPatrolStarting,
     toggleShift,
     syncLogsWithRemote,
-    flushSyncedCache,
     openSystemSettings,
     triggerEmergencySOS,
     autoSync,
@@ -292,6 +289,7 @@ function MainApp({
     requestBackgroundPermission,
     enableGpsInline,
     setActiveDutyType,
+    activeDutyType,
   } = patrolState;
 
   const styles = getStyles(isDarkTheme);
@@ -305,7 +303,7 @@ function MainApp({
         onToggleTheme={handleToggleTheme}
       />
 
-      {isShiftActive && (
+      {patrolStatus.running && (
         <View style={styles.patrolNotificationBar}>
           <View style={styles.patrolNotificationInfo}>
             <Text style={styles.patrolNotificationTitle}>
@@ -331,16 +329,15 @@ function MainApp({
       <DashboardView
         personnel={personnel}
         schedule={schedule}
-        isShiftActive={isShiftActive}
+        isShiftActive={patrolStatus.running}
         isGpsEnabled={isGpsEnabled}
         foregroundGranted={foregroundGranted}
         backgroundGranted={backgroundGranted}
         unsyncedCount={unsyncedCount}
-        logs={logs}
         isSyncing={isSyncing}
+        isPatrolStarting={isPatrolStarting}
         onToggleShift={toggleShift}
         onSync={syncLogsWithRemote}
-        onClearCache={flushSyncedCache}
         onOpenSettings={openSystemSettings}
         onEmergencySOS={triggerEmergencySOS}
         autoSync={autoSync}
@@ -353,6 +350,7 @@ function MainApp({
         onRequestBackground={requestBackgroundPermission}
         onEnableGpsInline={enableGpsInline}
         setActiveDutyType={setActiveDutyType}
+        activeDutyType={activeDutyType!}
       />
     </>
   );

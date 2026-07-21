@@ -10,11 +10,10 @@ import {
   Linking,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Personnel, PersonnelLog, Schedule } from "../types";
+import { Personnel, Schedule } from "../types";
 import { getStyles, getThemeColors } from "../theme/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import FontAwesome from "@expo/vector-icons/FontAwesome6";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PermissionView } from "../helper/PermissionView";
 
 const DUTY_TYPES = [
@@ -37,11 +36,10 @@ interface DashboardViewProps {
   isShiftActive: boolean;
   isGpsEnabled: boolean;
   unsyncedCount: number;
-  logs: PersonnelLog[];
   isSyncing: boolean;
+  isPatrolStarting: boolean;
   onToggleShift: () => void;
   onSync: () => void;
-  onClearCache: () => void;
   onOpenSettings: () => void;
   onEmergencySOS: () => void;
 
@@ -65,6 +63,7 @@ interface DashboardViewProps {
   onRequestForeground: () => Promise<boolean>;
   onRequestBackground: () => Promise<boolean>;
   onEnableGpsInline: () => Promise<boolean>;
+  activeDutyType: string;
 }
 
 export const DashboardView = ({
@@ -74,6 +73,7 @@ export const DashboardView = ({
   isGpsEnabled,
   unsyncedCount,
   isSyncing,
+  isPatrolStarting,
   onToggleShift,
   onSync,
   onOpenSettings,
@@ -85,6 +85,7 @@ export const DashboardView = ({
   onRequestBackground,
   onEnableGpsInline,
   setActiveDutyType,
+  activeDutyType,
 }: DashboardViewProps) => {
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
@@ -103,10 +104,9 @@ export const DashboardView = ({
     // 1. Declare the async function inside the hook
     const loadDutyType = async () => {
       try {
-        const duty = await AsyncStorage.getItem("@pnp_duty_type");
         //const isShiftActive = await AsyncStorage.getItem("@pnp_shift_status");
-        if (duty) {
-          setSelectedDutyType(duty);
+        if (activeDutyType) {
+          setSelectedDutyType(activeDutyType);
         }
 
         // if (isShiftActive! === "ACTIVE") {
@@ -363,6 +363,7 @@ export const DashboardView = ({
                       ? styles.toggleShiftBtnStop
                       : styles.toggleShiftBtnStart,
                   ]}
+                  disabled={isPatrolStarting}
                   activeOpacity={0.8}
                   onPress={async () => {
                     const action = isShiftActive ? "stop" : "start";
@@ -388,9 +389,13 @@ export const DashboardView = ({
                     }
                   }}
                 >
-                  <Text style={styles.toggleShiftBtnText}>
-                    {isShiftActive ? "STOP" : "START"}
-                  </Text>
+                  {isPatrolStarting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.toggleShiftBtnText}>
+                      {isShiftActive ? "STOP" : "START"}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </View>
 
@@ -943,10 +948,6 @@ export const DashboardView = ({
               navigation.navigate("Account", {
                 personnelId: personnel.id,
                 isDarkTheme: isDarkTheme,
-                onClose: () => {
-                  // Navigate back to home tab when closing account screen
-                  setActiveNav("home");
-                },
               });
             } else {
               // Handle case where personnel data is not available

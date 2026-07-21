@@ -1,36 +1,35 @@
 import { useState, useEffect, useCallback } from "react";
-import { Alert, Linking, Platform } from "react-native";
+import {
+  Alert,
+  Linking,
+  NativeModules,
+  NativeEventEmitter,
+} from "react-native";
 import * as Location from "expo-location";
-import * as BackgroundTracker from "../services/BackgroundTracker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system";
+import Constants from "expo-constants";
+
 import FCMModule from "../services/FCM";
-import { Personnel, Schedule, PersonnelLog } from "../types";
+import SignalStrengthModule from "../services/SignalStrengthModule";
+
+import { Personnel, Schedule } from "../types";
+
 import {
   getPersonnelById,
   findCandidatePersonnel,
   getScheduleByPersonnel,
-  getLatestLogs,
-  getUnsyncedLogs,
-  getUnsyncedCount,
-  markLogsAsSynced,
-  cleanSyncedLogs,
-  savePatrolLogsToLocalStorage,
   insertPatrolLogs,
-  syncPendingPatrolLogs,
 } from "../services/database";
-import {
-  startBackgroundUpdates,
-  stopBackgroundUpdates,
-  formatManilaTimestamp,
-} from "../services/BackgroundTracker";
+
 import {
   supabase,
-  isSupabaseConfigured,
   supabaseAdmin,
+  isSupabaseConfigured,
 } from "../services/supabase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import {
   enrollMFA,
   verifyMFAChallenge,
@@ -38,10 +37,8 @@ import {
   unenrollMFA,
 } from "../services/supabaseMFA";
 
-import Constants from "expo-constants";
-import SignalStrengthModule from "../services/SignalStrengthModule";
+const { PatrolService } = NativeModules;
 
-// Async storage keys for pending MFA verification
 const PENDING_MFA_USER_ID_KEY = "@pnp_pending_mfa_user_id";
 const PENDING_MFA_PERSONNEL_KEY = "@pnp_pending_mfa_personnel";
 
@@ -64,33 +61,80 @@ export type LoginResult =
       message: string;
     };
 
+interface PatrolStatus {
+  running: boolean;
+  dutyType: string;
+  personnelId: string;
+  totalLocations: number;
+  unsyncedLocations: number;
+  syncedLocations: number;
+  startedAt: number;
+}
+
+export const formatManilaTimestamp = (isShiftActive: boolean): string => {
+  const d = new Date();
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const manilaDate = new Date(utc);
+
+  const pad = (num: number) => String(num).padStart(2, "0");
+
+  if (isShiftActive) {
+    manilaDate.setSeconds(manilaDate.getSeconds() + 30);
+  }
+
+  return `${manilaDate.getFullYear()}-${pad(
+    manilaDate.getMonth() + 1,
+  )}-${pad(manilaDate.getDate())}T${pad(
+    manilaDate.getHours(),
+  )}:${pad(manilaDate.getMinutes())}:${pad(manilaDate.getSeconds())}Z`;
+};
+
 export const usePatrolState = () => {
   const [personnel, setPersonnel] = useState<Personnel | null>(null);
   const [schedule, setSchedule] = useState<Schedule[] | null>(null);
-  const [logs, setLogs] = useState<PersonnelLog[]>([]);
-  const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
 
-  const [isShiftActive, setIsShiftActive] = useState<boolean>(false);
-  const [autoSync, setAutoSync] = useState<boolean>(true);
+  const [patrolStatus, setPatrolStatus] = useState<PatrolStatus>({
+    running: false,
+    dutyType: "",
+    personnelId: "",
+    totalLocations: 0,
+    unsyncedLocations: 0,
+    syncedLocations: 0,
+    startedAt: 0,
+  });
 
-  const [isGpsEnabled, setIsGpsEnabled] = useState<boolean>(false);
+  const [unsyncedCount, setUnsyncedCount] = useState(0);
+
+  const [isShiftActive, setIsShiftActive] = useState(false);
+
+  const [autoSync, setAutoSync] = useState(true);
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isPatrolStarting, setIsPatrolStarting] = useState(false);
+
+  const [is2FAEnabled, setIs2FAEnabled] = useState(false);
+
+  const [gpsLoading, setGpsLoading] = useState(false);
+
+  const [isGpsEnabled, setIsGpsEnabled] = useState(false);
+
   const [foregroundGranted, setForegroundGranted] = useState<boolean | null>(
     null,
   );
+
   const [backgroundGranted, setBackgroundGranted] = useState<boolean | null>(
     null,
   );
 
-  const [gpsLoading, setGpsLoading] = useState<boolean>(false);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(false);
-  const SILENT_MODE_KEY = "@pnp_silent_mode";
-  const [isSilentMode, setIsSilentMode] = useState<boolean>(false);
   const [notificationGranted, setNotificationGranted] = useState<
     boolean | null
   >(null);
+
+  const [activeDutyType, setActiveDutyType] = useState<string | null>(
+    "Foot Patrol",
+  );
+
   const [isWithinScheduledTime, setIsWithinScheduledTime] = useState(false);
-  const [activeDutyType, setActiveDutyType] = useState<string | null>(null);
 
   const buildPersonnel = (remoteProfile: any, email: string): Personnel => ({
     id: remoteProfile.id,
@@ -109,17 +153,44 @@ export const usePatrolState = () => {
     viberNumber: remoteProfile.viber_number,
   });
 
-  // Checks device's system GPS and permission status
+  const refreshPatrolStatus = useCallback(async () => {
+    try {
+      const status = await PatrolService.getPatrolStatus();
+
+      setPatrolStatus(status);
+      setIsShiftActive(status.running);
+      setUnsyncedCount(status.unsyncedLocations);
+      console.log("status.dutyType: ", status.dutyType);
+      setActiveDutyType(status.dutyType);
+    } catch (e) {
+      console.warn(e);
+    }
+  }, []);
+
+  const updateUnsyncedCounter = useCallback(async () => {
+    try {
+      const status = await PatrolService.getPatrolStatus();
+
+      setUnsyncedCount(status.unsyncedLocations);
+    } catch (e) {
+      console.warn(e);
+    }
+  }, []);
+
   const checkLocationPermissionState = useCallback(async () => {
     try {
       const { status: fgStatus } =
         await Location.getForegroundPermissionsAsync();
+
       const { status: bgStatus } =
         await Location.getBackgroundPermissionsAsync();
+
       const enabled = await Location.hasServicesEnabledAsync();
 
       setForegroundGranted(fgStatus === "granted");
+
       setBackgroundGranted(bgStatus === "granted");
+
       setIsGpsEnabled(enabled);
 
       return enabled && fgStatus === "granted";
@@ -132,12 +203,16 @@ export const usePatrolState = () => {
   const requestForegroundPermission = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
+
       const granted = status === "granted";
+
       setForegroundGranted(granted);
+
       await checkLocationPermissionState();
+
       return granted;
     } catch (e) {
-      console.warn("Foreground permission request error", e);
+      console.warn(e);
       return false;
     }
   };
@@ -145,12 +220,16 @@ export const usePatrolState = () => {
   const requestBackgroundPermission = async () => {
     try {
       const { status } = await Location.requestBackgroundPermissionsAsync();
+
       const granted = status === "granted";
+
       setBackgroundGranted(granted);
+
       await checkLocationPermissionState();
+
       return granted;
     } catch (e) {
-      console.warn("Background permission request error", e);
+      console.warn(e);
       return false;
     }
   };
@@ -158,109 +237,123 @@ export const usePatrolState = () => {
   const enableGpsInline = async () => {
     try {
       setGpsLoading(true);
+
       await Location.enableNetworkProviderAsync();
-      let enabled = await Location.hasServicesEnabledAsync();
-      if (!enabled) {
-        enabled = await checkLocationPermissionState();
-      }
+
+      const enabled = await checkLocationPermissionState();
       setIsGpsEnabled(enabled);
-      console.log("enableGpsInline:", enabled);
       setGpsLoading(false);
+
       return enabled;
     } catch (e) {
       setGpsLoading(false);
-      console.warn("Enable network provider error", e);
+      console.warn(e);
       return false;
     }
   };
 
-  const loadLogsAndStats = useCallback(async () => {
-    // Use ref to get current personnel to avoid stale closure issues
-    if (!personnel) return;
+  const openSystemSettings = async () => {
+    setGpsLoading(true);
 
-    try {
-      const latest = await getLatestLogs(personnel.id, 12);
-      setLogs(latest);
-    } catch (e) {
-      console.warn("Could not query latest log cards", e);
-    }
-  }, [logs]); // Empty deps because we use ref instead of direct personnel variable
+    setTimeout(() => {
+      setGpsLoading(false);
+    }, 2000);
 
-  const updateUnsyncedCounter = useCallback(async () => {
-    // Use ref to get current personnel to avoid stale closure issues
-    try {
-      const count = await getUnsyncedCount();
-      setUnsyncedCount(count);
-    } catch (e) {
-      console.warn(e);
+    if (Linking.openSettings) {
+      await Linking.openSettings();
+    } else {
+      Alert.alert("Settings", "Unable to open system settings.");
     }
+  };
+
+  const emitter = new NativeEventEmitter(NativeModules.PatrolService);
+  useEffect(() => {
+    const subscription = emitter.addListener("PATROL_STOPPED", async () => {
+      setIsPatrolStarting(true);
+      // Wait until PatrolManager reports running
+      let running = false;
+
+      for (let i = 0; i < 20; i++) {
+        const status = await PatrolService.getPatrolStatus();
+
+        if (status.running) {
+          running = true;
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await updateUnsyncedCounter();
+      setIsShiftActive(running);
+      setIsPatrolStarting(running);
+    });
+
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
-    if (personnel) {
-      // This runs after personnel state has been updated
-      // Handle post-login logic here
-      (async () => {
-        const assignedSched = await getScheduleByPersonnel(personnel.id);
-        if (assignedSched) {
-          setSchedule(assignedSched);
-        }
-        await loadLogsAndStats();
-        await updateUnsyncedCounter();
-      })();
-    }
-  }, [personnel]);
-
-  // Poll system GPS state
-  useEffect(() => {
     checkLocationPermissionState();
-    const gpsInterval = setInterval(() => {
+
+    refreshPatrolStatus();
+
+    const interval = setInterval(() => {
       checkLocationPermissionState();
-    }, 20000); // Polling lessened from 4s to 20s to preserve battery
+      refreshPatrolStatus();
+    }, 15000);
 
-    return () => clearInterval(gpsInterval);
-  }, [checkLocationPermissionState]);
+    return () => clearInterval(interval);
+  }, [checkLocationPermissionState, refreshPatrolStatus]);
 
-  // Load settings on mount
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const val = await AsyncStorage.getItem("@pnp_auto_sync");
-        if (val !== null) {
-          setAutoSync(val === "true");
+        const auto = await AsyncStorage.getItem("@pnp_auto_sync");
+
+        if (auto !== null) {
+          setAutoSync(auto === "true");
         }
       } catch (e) {
-        console.warn("Failed to load @pnp_auto_sync", e);
+        console.warn(e);
       }
     };
+
     loadSettings();
-  }, []); // Run once on mount instead of depending on autoSync to prevent infinite loop
+  }, []);
 
-  // Load silent mode setting on mount
   useEffect(() => {
-    const loadSilentMode = async () => {
-      try {
-        const val = await AsyncStorage.getItem("@pnp_silent_mode");
-        if (val !== null) {
-          setIsSilentMode(val === "true");
-        }
-      } catch (e) {
-        console.warn("Failed to load silent mode setting:", e);
+    if (!personnel) return;
+
+    (async () => {
+      const sched = await getScheduleByPersonnel(personnel.id);
+
+      if (sched) {
+        setSchedule(sched);
       }
-    };
-    loadSilentMode();
-  }, []); // Run once on mount
 
-  // Set silent mode based on active duty type (optional automatic)
+      await refreshPatrolStatus();
+    })();
+  }, [personnel, refreshPatrolStatus]);
+
   useEffect(() => {
-    const isSilent =
-      activeDutyType === "Intel-Driven Operation" ||
-      activeDutyType === "Special Laws";
-    setIsSilentMode(isSilent);
-    AsyncStorage.setItem("@pnp_silent_mode", String(isSilent));
-  }, [activeDutyType]);
+    const timer = setInterval(() => {
+      refreshPatrolStatus();
+    }, 15000);
 
-  // Helper function to check if current time is within any schedule for today
+    return () => clearInterval(timer);
+  }, [refreshPatrolStatus]);
+
+  const toggleAutoSync = async () => {
+    try {
+      const next = !autoSync;
+
+      setAutoSync(next);
+
+      await AsyncStorage.setItem("@pnp_auto_sync", String(next));
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
   const checkIfWithinScheduledTime = useCallback(() => {
     if (!schedule || schedule.length === 0) {
       setIsWithinScheduledTime(false);
@@ -269,333 +362,551 @@ export const usePatrolState = () => {
     }
 
     const now = new Date();
-    const today = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const today = now.toISOString().split("T")[0];
 
-    let isWithin = false;
-    let activeDuty: string | null = null;
+    let active = false;
+    let duty: string | null = null;
 
-    for (const sched of schedule) {
-      if (sched.date !== today) continue;
+    for (const item of schedule) {
+      if (item.date !== today) continue;
 
-      const [fromHour, fromMin] = sched.timeFrom.split(":").map(Number);
-      const [toHour, toMin] = sched.timeTo.split(":").map(Number);
+      const [fh, fm] = item.timeFrom.split(":").map(Number);
 
-      const startTime = new Date(
+      const [th, tm] = item.timeTo.split(":").map(Number);
+
+      const start = new Date(
         now.getFullYear(),
         now.getMonth(),
         now.getDate(),
-        fromHour,
-        fromMin,
-        0,
-        0,
+        fh,
+        fm,
       );
-      const endTime = new Date(
+
+      const end = new Date(
         now.getFullYear(),
         now.getMonth(),
         now.getDate(),
-        toHour,
-        toMin,
-        0,
-        0,
+        th,
+        tm,
       );
 
-      // Overnight schedule (e.g. 22:00 -> 06:00)
-      if (endTime <= startTime) {
-        endTime.setDate(endTime.getDate() + 1);
+      if (end <= start) {
+        end.setDate(end.getDate() + 1);
       }
 
-      if (now >= startTime && now < endTime) {
-        isWithin = true;
-        activeDuty = sched.duty_type;
-        break; // Use the first matching schedule
+      if (now >= start && now < end) {
+        active = true;
+        duty = item.duty_type;
+        break;
       }
     }
 
-    setIsWithinScheduledTime(isWithin);
-    return isWithin;
+    setIsWithinScheduledTime(active);
+    setActiveDutyType(duty);
+
+    return active;
   }, [schedule]);
 
-  // Update push token for the current user when we have personnel and notification permission
-  useEffect(() => {
-    if (!personnel) return;
-  }, [personnel]);
+  const completeLogin = async (pUser: Personnel, emailInput: string) => {
+    setPersonnel(pUser);
 
-  // Check for auto-login request from notification tap AND active patrol session - Only runs when isShiftActive changes (not on personnel changes)
-  useEffect(() => {
-    const checkAutoLoginAndResume = async () => {
-      try {
-        // FIRST: Check if we have pending MFA data (user is in middle of MFA setup)
-        const pendingUserId = await AsyncStorage.getItem(
-          PENDING_MFA_USER_ID_KEY,
-        );
-        const pendingPersonnelJson = await AsyncStorage.getItem(
-          PENDING_MFA_PERSONNEL_KEY,
-        );
+    const assignedSched = await getScheduleByPersonnel(pUser.id);
 
-        if (pendingUserId && pendingPersonnelJson) {
-          try {
-            const pendingPersonnel = JSON.parse(pendingPersonnelJson);
-            // Validate that the pending personnel data is valid
-            if (pendingPersonnel && pendingPersonnel.id === pendingUserId) {
-              // Set personnel state from pending MFA data
-              setPersonnel(pendingPersonnel);
-
-              // Load associated data
-              const assignedSched = await getScheduleByPersonnel(
-                pendingPersonnel.id,
-              );
-              if (assignedSched) {
-                setSchedule(assignedSched);
-              }
-
-              loadLogsAndStats();
-              updateUnsyncedCounter();
-
-              console.log(
-                "[Auto-resume] Restored personnel state from pending MFA data for user:",
-                pendingUserId,
-              );
-
-              // Clear the pending MFA data since we've restored it
-              await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-              await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
-
-              return; // Important: return early to avoid overwriting with other login attempts
-            }
-          } catch (parseError) {
-            console.warn(
-              "Failed to parse pending MFA personnel data:",
-              parseError,
-            );
-            // Clear invalid pending data
-            await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-            await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
-          }
-        }
-
-        // SECOND: Check if auto-login was requested from notification tap
-        const autoLoginRequested = await AsyncStorage.getItem(
-          "@pnp_auto_login_requested",
-        );
-        const activePersonnelId = await AsyncStorage.getItem(
-          "@pnp_active_personnel_id",
-        );
-
-        console.log(
-          "autoLoginRequested, activePersonnelId",
-          autoLoginRequested,
-          activePersonnelId,
-        );
-        if (autoLoginRequested === "true" && activePersonnelId) {
-          // Clear the flag
-          await AsyncStorage.removeItem("@pnp_auto_login_requested");
-          setIsShiftActive(true);
-
-          // Check if Supabase is configured
-          if (isSupabaseConfigured()) {
-            // Try to get current Supabase session
-            const {
-              data: { user },
-              error,
-            } = await supabase.auth.getUser();
-
-            if (!error && user) {
-              // Valid session found, fetch personnel profile
-              const { data: remoteProfile, error: profileErr } = await supabase
-                .from("personnel")
-                .select("*")
-                .eq("id", user.id)
-                .single();
-
-              if (!profileErr && remoteProfile) {
-                // Create personnel object
-                const pUser = buildPersonnel(remoteProfile, user.email!);
-
-                // Set personnel state
-                setPersonnel(pUser);
-
-                // Load associated schedule, logs, and stats
-                const assignedSched = await getScheduleByPersonnel(pUser.id);
-                if (assignedSched) {
-                  setSchedule(assignedSched);
-                }
-
-                loadLogsAndStats();
-                updateUnsyncedCounter();
-                setIsShiftActive(true);
-
-                console.log(
-                  "[Auto-login] Successfully restored session for user:",
-                  user.email,
-                );
-              }
-            }
-          }
-        } else {
-          // THIRD: Check for active patrol session (app reopened during patrol)
-          // Only check for auto-resume if patrol is currently active
-          if (isShiftActive) {
-            const activePersonnelId = await AsyncStorage.getItem(
-              "@pnp_active_personnel_id",
-            );
-            const shiftStatus = await AsyncStorage.getItem("@pnp_shift_status");
-
-            if (
-              activePersonnelId &&
-              shiftStatus === "ACTIVE" &&
-              isSupabaseConfigured()
-            ) {
-              // Try to get current Supabase session
-              const {
-                data: { user },
-                error,
-              } = await supabase.auth.getUser();
-
-              if (!error && user) {
-                // Valid session found, fetch personnel profile
-                const { data: remoteProfile, error: profileErr } =
-                  await supabase
-                    .from("personnel")
-                    .select("*")
-                    .eq("id", user.id)
-                    .single();
-
-                if (!profileErr && remoteProfile) {
-                  // Create personnel object
-                  const pUser = buildPersonnel(remoteProfile, user.email!);
-
-                  // Set personnel state
-                  setPersonnel(pUser);
-
-                  // Load associated schedule, logs, and stats
-                  const assignedSched = await getScheduleByPersonnel(pUser.id);
-                  if (assignedSched) {
-                    setSchedule(assignedSched);
-                  }
-
-                  loadLogsAndStats();
-                  updateUnsyncedCounter();
-                  setIsShiftActive(true);
-
-                  console.log(
-                    "[Auto-resume] Successfully resumed patrol session for user:",
-                    user.email,
-                  );
-                }
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("[Auto-login/resume] Failed to restore session:", err);
-      }
-    };
-
-    // Only run auto-login/resume check if shift is active
-    if (isShiftActive) {
-      checkAutoLoginAndResume();
+    if (assignedSched) {
+      setSchedule(assignedSched);
     }
-  }, [isShiftActive]); // Only depend on isShiftActive, not personnel
 
-  // Restore session from storage on app mount
-  useEffect(() => {
-    const restoreSessionFromStorage = async () => {
-      try {
-        const status = await AsyncStorage.getItem("@pnp_shift_status");
-        if (status === "ACTIVE") {
-          const personnelId = await AsyncStorage.getItem(
-            "@pnp_active_personnel_id",
-          );
-          if (personnelId) {
-            // Fetch personnel from Supabase
-            const { data: remoteProfile, error: profileErr } = await supabase
-              .from("personnel")
-              .select("*, rank(*), unit(*)")
-              .eq("id", personnelId)
-              .single();
-            if (!profileErr && remoteProfile) {
-              // Get current Supabase user for email
-              const {
-                data: { user },
-                error: authError,
-              } = await supabase.auth.getUser();
-              if (!authError && user) {
-                const pUser = buildPersonnel(remoteProfile, user.email ?? "");
-                setPersonnel(pUser);
-                // Load associated data
-                const assignedSched = await getScheduleByPersonnel(pUser.id);
-                if (assignedSched) {
-                  setSchedule(assignedSched);
-                }
-                await loadLogsAndStats();
-                await updateUnsyncedCounter();
-                setIsShiftActive(true);
-                console.log(
-                  "[RestoreSession] Restored active session for user:",
-                  pUser.email,
-                );
-                return;
-              }
-            }
-          }
-        }
-        // If not active, ensure shift is false
-        setIsShiftActive(false);
-      } catch (err) {
-        console.warn("[RestoreSession] Failed to restore session:", err);
-        setIsShiftActive(false);
-      }
-    };
-    restoreSessionFromStorage();
-  }, []); // Run once on mount
+    await refreshPatrolStatus();
 
-  const toggleAutoSync = async () => {
     try {
-      const nextVal = !autoSync;
-      setAutoSync(nextVal);
-      await AsyncStorage.setItem("@pnp_auto_sync", String(nextVal));
-    } catch (e) {
-      console.warn("Failed to save @pnp_auto_sync", e);
+      const token = await FCMModule.getToken();
+
+      await supabase
+        .from("personnel")
+        .update({
+          fcm_token: token,
+        })
+        .eq("id", pUser.id);
+
+      await AsyncStorage.setItem("@pnp_user_name", emailInput);
+    } catch (err) {
+      console.warn("Error: ", err);
     }
   };
 
-  // const toggleSilentMode = async () => {
-  //   try {
-  //     const nextVal = !isSilentMode;
-  //     setIsSilentMode(nextVal);
-  //     await AsyncStorage.setItem(SILENT_MODE_KEY, String(nextVal));
-  //   } catch (e) {
-  //     console.warn("Failed to save silent mode setting:", e);
-  //   }
-  // };
+  const login = async (
+    emailInput: string,
+    passwordInput: string,
+    otpCode?: string,
+  ): Promise<LoginResult> => {
+    const email = emailInput.trim().toLowerCase();
 
-  // Supabase 2FA Settings & check effects
-  useEffect(() => {
-    const check2FA = async () => {
-      // Use ref to get current personnel to avoid stale closure issues
-      if (personnel) {
-        try {
-          // Use personnel.id as the key for AsyncStorage to ensure consistency
-          const personnelIdKey = personnel.id;
-          const status = await checkMFAStatus(
-            personnel.email || personnel.badgeNumber,
-          );
-          setIs2FAEnabled(status.isEnabled);
-          if (status.isEnabled && status.factorId) {
-            await AsyncStorage.setItem(
-              `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
-              status.factorId,
-            );
-          }
-        } catch (e) {
-          console.warn("Error checking Supabase MFA state", e);
-        }
-      } else {
-        setIs2FAEnabled(false);
+    if (!email || !email.includes("@")) {
+      return {
+        status: "ERROR",
+        message: "Please enter a valid email address.",
+      };
+    }
+
+    if (!passwordInput.trim()) {
+      return {
+        status: "ERROR",
+        message: "Please enter your password.",
+      };
+    }
+
+    if (!isSupabaseConfigured()) {
+      return {
+        status: "ERROR",
+        message: "Supabase is not configured.",
+      };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: passwordInput,
+      });
+
+      if (error) {
+        return {
+          status: "ERROR",
+          message: error.message,
+        };
       }
-    };
-    check2FA();
-  }, [personnel]);
+
+      if (!data.user) {
+        return {
+          status: "ERROR",
+          message: "Authentication failed.",
+        };
+      }
+
+      const authUser = data.user;
+
+      const { data: remoteProfile, error: profileErr } = await supabase
+        .from("personnel")
+        .select("*, rank(*), unit(*)")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (profileErr) {
+        throw profileErr;
+      }
+
+      if (!remoteProfile) {
+        return {
+          status: "NOT_FOUND",
+        };
+      }
+
+      const pUser = buildPersonnel(remoteProfile, authUser.email ?? email);
+
+      if (!pUser.isApproved) {
+        return {
+          status: "PENDING_APPROVAL",
+        };
+      }
+
+      const projectId =
+        Constants.expoConfig?.extra?.eas?.projectId ??
+        Constants.easConfig?.projectId;
+
+      if (!projectId) {
+        throw new Error("EAS Project ID not found.");
+      }
+
+      const status = await checkMFAStatus(email);
+
+      if (!status.isEnabled) {
+        const enrollment = await enrollMFA(email);
+
+        await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
+
+        await AsyncStorage.setItem(
+          PENDING_MFA_PERSONNEL_KEY,
+          JSON.stringify(pUser),
+        );
+
+        await AsyncStorage.setItem(
+          `@pnp_supabase_mfa_factor_id_${pUser.id}`,
+          enrollment.factorId,
+        );
+
+        if (enrollment.pendingEnrollment) {
+          return {
+            status: "NEED_MFA_VERIFICATION",
+            factorId: enrollment.factorId,
+          };
+        }
+
+        if (enrollment.alreadyVerified) {
+          return {
+            status: "NEED_MFA_LOGIN",
+            factorId: enrollment.factorId,
+          };
+        }
+
+        return {
+          status: "NEED_MFA_SETUP",
+          factorId: enrollment.factorId,
+          secret: enrollment.secret!,
+        };
+      }
+
+      if (!otpCode) {
+        return {
+          status: "NEED_MFA_LOGIN",
+          factorId: status.factorId!,
+        };
+      }
+
+      const verified = await verifyMFAChallenge(status.factorId!, otpCode);
+
+      if (!verified) {
+        return {
+          status: "ERROR",
+          message: "Invalid or expired MFA verification code.",
+        };
+      }
+
+      await completeLogin(pUser, emailInput);
+
+      return {
+        status: "SUCCESS",
+      };
+    } catch (e: any) {
+      console.error(e);
+
+      return {
+        status: "ERROR",
+        message: e.message ?? "Authentication failed.",
+      };
+    }
+  };
+
+  const logout = useCallback(async () => {
+    try {
+      if (patrolStatus.running) {
+        await PatrolService.stopService();
+      }
+
+      await supabase.auth.signOut();
+
+      await AsyncStorage.multiRemove([
+        PENDING_MFA_USER_ID_KEY,
+        PENDING_MFA_PERSONNEL_KEY,
+        "@pnp_user_name",
+      ]);
+    } catch (e) {
+      console.warn(e);
+    }
+
+    setPersonnel(null);
+    setSchedule(null);
+    setIsShiftActive(false);
+
+    setPatrolStatus({
+      running: false,
+      dutyType: "",
+      personnelId: "",
+      totalLocations: 0,
+      unsyncedLocations: 0,
+      syncedLocations: 0,
+      startedAt: 0,
+    });
+  }, [patrolStatus.running]);
+
+  const triggerEmergencySOS = async (): Promise<boolean> => {
+    if (!personnel) {
+      Alert.alert(
+        "Authentication Error",
+        "You must be logged in to send an SOS.",
+      );
+      return false;
+    }
+
+    const isSilent =
+      activeDutyType === "Intel-Driven Operation" ||
+      activeDutyType === "Special Laws";
+
+    if (isSilent) {
+      try {
+        const signal = await SignalStrengthModule.getSignalStrength();
+
+        const result = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation,
+        });
+
+        await insertPatrolLogs([
+          {
+            id: "", //crypto.randomUUID(),
+            personnelId: personnel.id,
+            personnel: {
+              fullname: personnel.fullname,
+              rank_name: personnel.rank?.rank_name ?? "",
+            },
+            latitude: result.coords.latitude,
+            longitude: result.coords.longitude,
+            speed: result.coords.speed ?? 0,
+            networkSignal: signal.level,
+            dutyType: activeDutyType,
+            capturedAt: formatManilaTimestamp(true),
+            isSynced: false,
+          },
+        ]);
+
+        await updateUnsyncedCounter();
+
+        return true;
+      } catch (e) {
+        console.error(e);
+        return false;
+      }
+    }
+
+    return new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "DISTRESS SIGNAL",
+        "This will immediately send an emergency alert with your live GPS location back to Headquarters.",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Send",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                const signal = await SignalStrengthModule.getSignalStrength();
+
+                const location = await Location.getCurrentPositionAsync({
+                  accuracy: Location.Accuracy.BestForNavigation,
+                });
+
+                await insertPatrolLogs([
+                  {
+                    id: "", //crypto.randomUUID(),
+                    personnelId: personnel.id,
+                    personnel: {
+                      fullname: personnel.fullname,
+                      rank_name: personnel.rank?.rank_name ?? "",
+                    },
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                    speed: location.coords.speed ?? 0,
+                    networkSignal: signal.level,
+                    dutyType: "EMERGENCY_SOS",
+                    capturedAt: formatManilaTimestamp(true),
+                    isSynced: false,
+                  },
+                ]);
+
+                await updateUnsyncedCounter();
+
+                Alert.alert(
+                  "SOS Sent",
+                  "Emergency signal transmitted successfully.",
+                );
+
+                resolve(true);
+              } catch (e: any) {
+                console.error(e);
+
+                Alert.alert("SOS Failed", e.message ?? "Unable to send SOS.");
+
+                resolve(false);
+              }
+            },
+          },
+        ],
+      );
+    });
+  };
+
+  const registerUser = async (registrationData: {
+    email: string;
+    badge_number: string;
+    rank_id: string;
+    fullname: string;
+    unit_id: string;
+    designation: string;
+    phone_number: string;
+    viber_number: string;
+    password?: string;
+    photoUri: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    try {
+      const token = await FCMModule.getToken();
+
+      const candidate = await findCandidatePersonnel(
+        registrationData.badge_number,
+        registrationData.rank_id,
+        registrationData.unit_id,
+        registrationData.designation,
+      );
+
+      if (!candidate) {
+        return {
+          success: false,
+          message: "Personnel record not found.",
+        };
+      }
+
+      const { error: authError } = await supabaseAdmin.auth.admin.createUser({
+        id: candidate.id,
+        email: registrationData.email,
+        password: registrationData.password ?? "",
+        email_confirm: true,
+      });
+
+      if (authError) throw authError;
+
+      if (registrationData.photoUri) {
+        const resized = await manipulateAsync(
+          registrationData.photoUri,
+          [{ resize: { width: 800 } }],
+          {
+            compress: 0.7,
+            format: SaveFormat.JPEG,
+          },
+        );
+
+        const base64 = await FileSystem.readAsStringAsync(resized.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const fileName = `${Date.now()}.jpg`;
+
+        const { data, error } = await supabase.storage
+          .from("personnel-photos")
+          .upload(fileName, decode(base64), {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
+
+        if (error) throw error;
+
+        const { data: url } = supabase.storage
+          .from("personnel-photos")
+          .getPublicUrl(data.path);
+
+        await supabase
+          .from("personnel")
+          .update({
+            photo_url: url.publicUrl,
+            fcm_token: token,
+          })
+          .eq("id", candidate.id);
+      }
+
+      return {
+        success: true,
+        message: "Registration successful.",
+      };
+    } catch (e: any) {
+      console.error(e);
+
+      return {
+        success: false,
+        message: e.message,
+      };
+    }
+  };
+
+  const refreshPersonnel = useCallback(async () => {
+    if (!personnel) return;
+
+    const latest = await getPersonnelById(personnel.id);
+
+    if (!latest) return;
+
+    setPersonnel(latest);
+
+    const sched = await getScheduleByPersonnel(latest.id);
+
+    if (sched) {
+      setSchedule(sched);
+    }
+
+    await refreshPatrolStatus();
+  }, [personnel, refreshPatrolStatus]);
+
+  const toggleShift = async () => {
+    if (!personnel) return;
+
+    const gpsOk = await checkLocationPermissionState();
+
+    if (!gpsOk) {
+      Alert.alert(
+        "GPS Required",
+        "CANNOT START PATROL: Please enable your system GPS / Location switch first.",
+        [
+          {
+            text: "Turn on GPS in Settings",
+            onPress: openSystemSettings,
+          },
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+        ],
+      );
+
+      return;
+    }
+
+    try {
+      setIsPatrolStarting(true);
+      const status = await PatrolService.getPatrolStatus();
+
+      var stopped = false;
+      if (status.running) {
+        await PatrolService.stopService();
+        stopped = true;
+      } else {
+        console.log(
+          "activeDutyType: ",
+          activeDutyType,
+          "personnel.id: ",
+          personnel.id,
+        );
+        await PatrolService.startPatrol(activeDutyType ?? "", personnel.id);
+      }
+
+      // Wait until PatrolManager reports running
+      let running = false;
+
+      for (let i = 0; i < 20; i++) {
+        const status = await PatrolService.getPatrolStatus();
+
+        if (status.running) {
+          running = true;
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+
+      Alert.alert(
+        stopped ? "Patrol Stopped" : "Patrol Started",
+        stopped
+          ? "Your patrol has been stopped."
+          : "Background patrol tracking is now active.",
+      );
+
+      await refreshPatrolStatus();
+      setIsPatrolStarting(false);
+    } catch (err: any) {
+      Alert.alert(
+        "Service Error",
+        err.message ?? "Unable to control patrol service.",
+      );
+      setIsPatrolStarting(false);
+    }
+  };
 
   const enable2FA = async (
     user_id: string,
@@ -689,800 +1000,69 @@ export const usePatrolState = () => {
     }
   };
 
-  // Synchronize logs & counts when off/on shift, with optional automatic remote sync (preserves cellular logs inside SQLite when turned off)
-  useEffect(() => {
-    let logTimer: ReturnType<typeof setInterval> | null = null;
-    let countsTimer: ReturnType<typeof setInterval> | null = null;
-    let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
-
-    if (isShiftActive) {
-      logTimer = setInterval(() => {
-        loadLogsAndStats();
-      }, 15000); // Polling slowed from 5s to 15s to optimize CPU/battery
-
-      countsTimer = setInterval(() => {
-        updateUnsyncedCounter();
-      }, 15000); // Polling slowed from 3s to 15s to optimize CPU/battery
-
-      if (autoSync) {
-        autoSyncTimer = setInterval(() => {
-          syncLogsWithRemote(false); // Quiet auto background sync
-        }, 30000); // battery optimize: auto upload logs every 30 seconds
-      }
-    } else {
-      loadLogsAndStats();
-      updateUnsyncedCounter();
-    }
-
-    return () => {
-      if (logTimer) clearInterval(logTimer);
-      if (countsTimer) clearInterval(countsTimer);
-      if (autoSyncTimer) clearInterval(autoSyncTimer);
-    };
-  }, [
-    personnel,
-    isShiftActive,
-    autoSync,
-    loadLogsAndStats,
-    updateUnsyncedCounter,
-  ]);
-
-  const openSystemSettings = async () => {
-    setGpsLoading(true);
-    setTimeout(() => setGpsLoading(false), 2000);
-    if (Linking.openSettings) {
-      await Linking.openSettings();
-    } else {
-      Alert.alert(
-        "Settings",
-        "Could not open system settings. Please manually turn on Location Services.",
-      );
-    }
-  };
-
-  const completeLogin = async (pUser: Personnel, emailInput: string) => {
-    // Save state
-    setPersonnel(pUser);
-
-    // Load schedule
-    const assignedSched = await getScheduleByPersonnel(pUser.id);
-
-    if (assignedSched) {
-      setSchedule(assignedSched);
-    }
-
-    // Refresh dashboard
-    await loadLogsAndStats();
-    await updateUnsyncedCounter();
-
-    // Update Expo push token
-    try {
-      const token = await FCMModule.getToken();
-
-      await supabase
-        .from("personnel")
-        .update({
-          fcm_token: token,
-        })
-        .eq("id", pUser.id);
-
-      AsyncStorage.setItem("@pnp_user_name", emailInput);
-    } catch (err) {
-      console.warn("Unable to update Expo push token", err);
-    }
-  };
-
-  const login = async (
-    emailInput: string,
-    passwordInput: string,
-    otpCode?: string,
-  ): Promise<LoginResult> => {
-    const trimmedEmail = emailInput.trim().toLowerCase();
-
-    if (!trimmedEmail || !trimmedEmail.includes("@")) {
-      return {
-        status: "ERROR",
-        message: "Please enter a valid email address.",
-      };
-    }
-
-    if (!passwordInput.trim()) {
-      return {
-        status: "ERROR",
-        message: "Please enter your password.",
-      };
-    }
-
-    if (!isSupabaseConfigured()) {
-      return {
-        status: "ERROR",
-        message:
-          "Supabase is not configured. Please configure your environment variables.",
-      };
-    }
-
-    try {
-      // ------------------------------------------------------------------
-      // STEP 1
-      // Authenticate with Supabase
-      // ------------------------------------------------------------------
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: trimmedEmail,
-        password: passwordInput,
-      });
-
-      if (error) {
-        return {
-          status: "ERROR",
-          message: error.message,
-        };
-      }
-
-      if (!data.user) {
-        return {
-          status: "ERROR",
-          message: "Authentication failed.",
-        };
-      }
-
-      const authUser = data.user;
-
-      // ------------------------------------------------------------------
-      // STEP 2
-      // Retrieve personnel profile
-      // ------------------------------------------------------------------
-
-      const { data: remoteProfile, error: profileErr } = await supabase
-        .from("personnel")
-        .select("*, rank(*), unit(*)")
-        .eq("id", authUser.id)
-        .maybeSingle();
-
-      if (profileErr) throw profileErr;
-
-      if (!remoteProfile) {
-        return {
-          status: "NOT_FOUND",
-        };
-      }
-
-      const pUser = buildPersonnel(
-        remoteProfile,
-        authUser.email ?? trimmedEmail,
-      );
-
-      // ------------------------------------------------------------------
-      // STEP 3
-      // Check approval BEFORE MFA
-      // ------------------------------------------------------------------
-
-      if (!pUser.isApproved) {
-        return {
-          status: "PENDING_APPROVAL",
-        };
-      }
-
-      // ------------------------------------------------------------------
-      // STEP 4
-      // Determine project id
-      // ------------------------------------------------------------------
-
-      const projectId =
-        Constants.expoConfig?.extra?.eas?.projectId ??
-        Constants.easConfig?.projectId;
-
-      if (!projectId) {
-        throw new Error("EAS Project ID not found.");
-      }
-
-      // ------------------------------------------------------------------
-      // STEP 5
-      // MFA STATUS
-      // ------------------------------------------------------------------
-
-      const status = await checkMFAStatus(trimmedEmail);
-
-      // ------------------------------------------------------------------
-      // STEP 6
-      // User has no verified MFA
-      // ------------------------------------------------------------------
-
-      if (!status.isEnabled) {
-        const enrollment = await enrollMFA(trimmedEmail);
-
-        // Save pending personnel so LoginView can finish enrollment
-        await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
-
-        await AsyncStorage.setItem(
-          PENDING_MFA_PERSONNEL_KEY,
-          JSON.stringify(pUser),
-        );
-
-        await AsyncStorage.setItem(
-          `@pnp_supabase_mfa_factor_id_${pUser.id}`,
-          enrollment.factorId,
-        );
-
-        if (enrollment.pendingEnrollment) {
-          return {
-            status: "NEED_MFA_VERIFICATION",
-            factorId: enrollment.factorId,
-          };
-        }
-
-        if (enrollment.alreadyVerified) {
-          return {
-            status: "NEED_MFA_LOGIN",
-            factorId: enrollment.factorId,
-          };
-        }
-
-        return {
-          status: "NEED_MFA_SETUP",
-          factorId: enrollment.factorId,
-          secret: enrollment.secret!,
-        };
-      }
-
-      // ------------------------------------------------------------------
-      // STEP 7
-      // User already has MFA
-      // ------------------------------------------------------------------
-
-      if (!otpCode) {
-        return {
-          status: "NEED_MFA_LOGIN",
-          factorId: status.factorId!,
-        };
-      }
-
-      const verified = await verifyMFAChallenge(status.factorId!, otpCode);
-
-      if (!verified) {
-        return {
-          status: "ERROR",
-          message: "Invalid or expired MFA verification code.",
-        };
-      }
-
-      // ------------------------------------------------------------------
-      // STEP 8
-      // MFA SUCCESS
-      // ------------------------------------------------------------------
-
-      await completeLogin(pUser, emailInput);
-
-      return {
-        status: "SUCCESS",
-      };
-    } catch (e: any) {
-      console.error(e);
-
-      return {
-        status: "ERROR",
-        message: e.message ?? "Authentication failed.",
-      };
-    }
-  };
-
-  const logout = useCallback(async () => {
-    try {
-      await BackgroundTracker.stopBackgroundUpdates();
-      await AsyncStorage.removeItem(PENDING_MFA_USER_ID_KEY);
-      await AsyncStorage.removeItem(PENDING_MFA_PERSONNEL_KEY);
-      // CLEAR PATROL STATE WHEN LOGGING OUT
-      await AsyncStorage.removeItem(BackgroundTracker.PATROL_STATE_KEY);
-      await AsyncStorage.removeItem(BackgroundTracker.PATROL_START_TIME_KEY);
-    } catch {
-      // Ignored for clean sign out
-    }
-    setIsShiftActive(false);
-    setPersonnel(null);
-  }, []);
-
-  const toggleShift = async () => {
-    if (!personnel) return;
-
-    // FORCE SYSTEM GPS TO BE ENABLED
-    const gpsOk = await checkLocationPermissionState();
-    if (!gpsOk) {
-      Alert.alert(
-        "GPS Required",
-        "CANNOT START PATROL: Please enable your system GPS / Location switch first to map secure foot patrol telemetry.",
-        [
-          { text: "Turn on GPS in Settings", onPress: openSystemSettings },
-          { text: "Cancel", style: "cancel" },
-        ],
-      );
-      return;
-    }
-
-    if (isShiftActive) {
-      setIsShiftActive(false);
-      try {
-        await stopBackgroundUpdates();
-      } catch (err) {
-        console.warn("Background service stop error", err);
-      }
-      Alert.alert(
-        "Patrol Ceased",
-        "Your active patrol shift has been successfully paused and logged.",
-      );
-    } else {
-      // Check if within scheduled time before allowing shift to start
-      // const isWithinTime = checkIfWithinScheduledTime();
-      // if (!isWithinTime) {
-      //   Alert.alert(
-      //     "Outside Scheduled Time",
-      //     "You can only start patrolling during your scheduled duty hours.\nPlease check your schedule for today.",
-      //     [{ text: "OK", style: "cancel" }]
-      //   );
-      //   return;
-      // }
-
-      // Store duty type for background tracking
-      if (activeDutyType) {
-        await AsyncStorage.setItem("@pnp_duty_type", activeDutyType);
-      }
-
-      // Vehicle functionality removed - using personnel only
-
-      try {
-        await AsyncStorage.setItem("@pnp_active_personnel_id", personnel.id);
-        const started = await BackgroundTracker.startBackgroundUpdates();
-        if (started) {
-          setIsShiftActive(true);
-          // PERSIST PATROL STATE FOR PROCESS RECOVERY
-          await AsyncStorage.setItem(
-            BackgroundTracker.PATROL_STATE_KEY,
-            "true",
-          );
-          await AsyncStorage.setItem(
-            BackgroundTracker.PATROL_START_TIME_KEY,
-            Date.now().toString(),
-          );
-          await AsyncStorage.setItem("@pnp_shift_status", "ACTIVE");
-          // Alert.alert(
-          //   "Patrol Active",
-          //   "PNP background tracking initialized! Telemetry is captured securely even when minimized/closed. ",
-          // );
-        }
-      } catch (err: any) {
-        Alert.alert(
-          "Service Notification",
-          `Background service error: ${err.message || "Unable to start background tracking service."}`,
-          [
-            {
-              text: "Retry",
-              onPress: () => {
-                toggleShift(); // Retry toggling the shift
-              },
-            },
-            { text: "Cancel", style: "cancel" },
-          ],
-        );
-      }
-    }
-  };
-
   const syncLogsWithRemote = async (showPromptAndAlerts: boolean = true) => {
     if (isSyncing) return;
     setIsSyncing(true);
 
     try {
-      const offlineLogs = await getUnsyncedLogs();
-      if (offlineLogs.length === 0) {
-        if (showPromptAndAlerts) {
-          Alert.alert(
-            "Up to Date",
-            "No pending coordinate logs inside local storage cache require syncing.",
-          );
-        }
-        setIsSyncing(false);
-        return;
-      }
+      var uploaded = await PatrolService.uploadUnsyncedLogs();
 
-      if (!isSupabaseConfigured()) {
-        if (showPromptAndAlerts) {
-          Alert.alert(
-            "Sync Error",
-            "Supabase is not configured. Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY environment variables to enable data synchronization.",
-          );
-        }
-        setIsSyncing(false);
-        return;
-      }
+      Alert.alert(
+        uploaded > 0 ? "Successfully uploaded" : "Up to Date",
+        uploaded > 0
+          ? "Your logs has been successfully uploaded to the database."
+          : "No pending coordinate logs inside local storage cache require syncing.",
+      );
 
-      const payload = offlineLogs.map((log) => ({
-        personnel_id: log.personnelId,
-        latitude: log.latitude,
-        longitude: log.longitude,
-        speed: log.speed,
-        network_signal: log.networkSignal,
-        duty_type: log.dutyType,
-        captured_at: log.capturedAt,
-      }));
-
-      const { error } = await supabase.from("patrol_logs").insert(payload);
-      if (error) throw error;
-
-      const ids = offlineLogs.map((l) => l.id);
-      await markLogsAsSynced(ids);
-      await updateUnsyncedCounter();
-      await loadLogsAndStats();
-
-      if (showPromptAndAlerts) {
-        Alert.alert(
-          "Patrol Synchronized",
-          `Successfully uploaded ${ids.length} patrol points securely back to PNP Command Operations HQ.`,
-        );
-      }
-    } catch (e: any) {
-      console.error(e);
-      if (showPromptAndAlerts) {
-        Alert.alert(
-          "Sync Failure",
-          `Remote gateway is unreachable: ${e.message || e}`,
-        );
-      }
-    } finally {
+      await refreshPatrolStatus();
       setIsSyncing(false);
-    }
-  };
-
-  const flushSyncedCache = async () => {
-    Alert.alert(
-      "Flush Synced Cache",
-      "Are you sure you want to delete already synced logs from local storage memory?",
-      [
-        {
-          text: "Delete Logs",
-          style: "destructive",
-          onPress: async () => {
-            await cleanSyncedLogs();
-            loadLogsAndStats();
-            Alert.alert("Success", "Synced logs cleared from local storage.");
-          },
-        },
-        { text: "Cancel", style: "cancel" },
-      ],
-    );
-  };
-
-  const triggerEmergencySOS = async (): Promise<boolean> => {
-    if (!personnel) {
-      Alert.alert(
-        "Authentication Error",
-        "You must be logged in to send an SOS.",
-      );
-      return false;
-    }
-
-    // Check if we're in silent mode (no notifications for SOS)
-    const isSilentMode =
-      activeDutyType === "Intel-Driven Operation" ||
-      activeDutyType === "Special Laws";
-
-    if (isSilentMode) {
-      try {
-        // Get current signal strength (still useful for diagnostics)
-        const signal = await SignalStrengthModule.getSignalStrength();
-
-        // Determine duration of shift if available
-        let durationSeconds = 0;
-        try {
-          const startStr = await AsyncStorage.getItem("@pnp_shift_start");
-          if (startStr) {
-            const start = new Date(parseInt(startStr, 10));
-            const now = new Date();
-            durationSeconds = Math.floor(
-              (now.getTime() - start.getTime()) / 1000,
-            );
-          }
-        } catch (e) {
-          console.warn("Could not read shift start time for duration", e);
-        }
-
-        const captured = formatManilaTimestamp(isShiftActive);
-        let shiftWasActive = isShiftActive;
-        if (shiftWasActive) {
-          setIsShiftActive(false);
-          await AsyncStorage.removeItem("@pnp_shift_status");
-        }
-        const uniqueId = "sos-" + Math.random().toString(36).substring(2, 11);
-
-        // In silent mode, we store a log with duty type set to the selected silent mode
-        // and zeroed location to indicate no GPS was recorded.
-        const sosLog: PersonnelLog = {
-          id: uniqueId,
-          personnelId: personnel.id,
-          personnel: {
-            rank_name: personnel.rank?.rank_name || "",
-            fullname: personnel.fullname,
-          },
-          latitude: 0, // No GPS stored in silent mode
-          longitude: 0, // No GPS stored in silent mode
-          speed: 0,
-          networkSignal: signal.level,
-          dutyType: activeDutyType, // Preserve the selected silent duty type
-          capturedAt: captured,
-          isSynced: false,
-        };
-        // If the database schema supports a duration field, attach it.
-        // Assuming the backend accepts extra fields; otherwise, adjust schema accordingly.
-        (sosLog as any).durationSeconds = durationSeconds;
-
-        await insertPatrolLogs([sosLog]);
-        await updateUnsyncedCounter();
-        await loadLogsAndStats();
-
-        return true;
-      } catch (err: any) {
-        console.error(err);
-        return false;
-      }
-    }
-
-    // Normal mode: show confirmation, then send SOS with GPS
-    return new Promise<boolean>((resolve) => {
-      Alert.alert(
-        "DISTRESS SIGNAL",
-        "This will immediately send an emergency alert with your live GPS location back to INPPO HQ and notify your unit/station members. Are you sure you want to trigger it?",
-        [
-          {
-            text: "Cancel",
-            style: "cancel",
-            onPress: () => resolve(false),
-          },
-          {
-            text: "YES, SEND DISTRESS ALERT",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                let lat = 14.591;
-                let lng = 120.973;
-                let speed = 0.0;
-
-                try {
-                  const { status } =
-                    await Location.getForegroundPermissionsAsync();
-                  if (status !== "granted") {
-                    const { status } =
-                      await Location.requestForegroundPermissionsAsync();
-                    if (status !== Location.PermissionStatus.GRANTED) {
-                      resolve(false);
-                      return;
-                    }
-                  }
-
-                  const loc = await Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.BestForNavigation,
-                  });
-                  lat = loc.coords.latitude;
-                  lng = loc.coords.longitude;
-                  speed = loc.coords.speed || 0.0;
-                } catch (e) {
-                  console.warn(
-                    "GPS request failed, using fallback coordinates",
-                    e,
-                  );
-                  if (logs.length > 0) {
-                    lat = logs[0].latitude;
-                    lng = logs[0].longitude;
-                    speed = logs[0].speed;
-                  }
-                }
-
-                const captured = formatManilaTimestamp(isShiftActive);
-                let shiftWasActive = isShiftActive;
-                if (shiftWasActive) {
-                  setIsShiftActive(false);
-                  await AsyncStorage.removeItem("@pnp_shift_status");
-                }
-                const uniqueId =
-                  "sos-" + Math.random().toString(36).substring(2, 11);
-
-                const signal = await SignalStrengthModule.getSignalStrength();
-
-                const sosLog: PersonnelLog = {
-                  id: uniqueId,
-                  personnelId: personnel.id,
-                  personnel: {
-                    rank_name: personnel.rank?.rank_name || "",
-                    fullname: personnel.fullname,
-                  },
-                  latitude: lat,
-                  longitude: lng,
-                  speed: speed, // Special speed indicator for SOS alert
-                  networkSignal: signal.level, // Fixing the typo in signal.level assignment
-                  dutyType: "EMERGENCY_SOS", // Special duty type for SOS
-                  capturedAt: captured,
-                  isSynced: false, // Initially not synced
-                };
-
-                await insertPatrolLogs([sosLog]);
-                await updateUnsyncedCounter();
-                await loadLogsAndStats();
-
-                // Only show success alert if not in silent mode
-                Alert.alert(
-                  "DISTRESS SIGNAL SENT",
-                  `Your unit/station members have been notified with your location.\nPlease stay at your position or proceed to the safe area.`,
-                );
-
-                resolve(true);
-              } catch (err: any) {
-                console.error(err);
-                Alert.alert(
-                  "SOS Failed",
-                  "Could not complete SOS handshake: " + (err.message || err),
-                );
-                resolve(false);
-              }
-            },
-          },
-        ],
-        { cancelable: true },
-      );
-    });
-  };
-
-  const registerUser = async (registrationData: {
-    email: string;
-    badge_number: string;
-    rank_id: string;
-    fullname: string;
-    unit_id: string;
-    designation: string;
-    phone_number: string;
-    viber_number: string;
-    password?: string;
-    photoUri: string; // Required photo URI for upload
-  }): Promise<{ success: boolean; message: string }> => {
-    try {
-      const token = await FCMModule.getToken();
-
-      // 1. Verify existence of the personnel via badge_number, rank_id, unit_id, and designation
-      const candidate = await findCandidatePersonnel(
-        registrationData.badge_number,
-        registrationData.rank_id,
-        registrationData.unit_id,
-        registrationData.designation,
-      );
-
-      if (!candidate) {
-        return {
-          success: false,
-          message:
-            "No matching personnel record found with the provided information. Registration is denied.",
-        };
-      }
-
-      // 2. Create Supabase auth user (to trigger confirmation email)
-      const { data: authUser, error: authError } =
-        await supabaseAdmin.auth.admin.createUser({
-          id: candidate.id,
-          email: registrationData.email,
-          password: registrationData.password || "",
-          email_confirm: true,
-        });
-
-      if (authError) {
-        throw authError;
-      }
-
-      // 4. If photo URI is provided, upload the photo to Supabase storage
-      if (registrationData.photoUri) {
-        try {
-          // Resize/compress image for efficiency
-          const resized = await manipulateAsync(
-            registrationData.photoUri,
-            [{ resize: { width: 800 } }],
-            { compress: 0.7, format: SaveFormat.JPEG },
-          );
-          const base64Data = await FileSystem.readAsStringAsync(resized.uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          const arrayBuffer = decode(base64Data);
-          const fileName = `${Date.now()}.jpg`;
-
-          // Upload the ArrayBuffer instead of the problematic Blob
-          const { data, error } = await supabase.storage
-            .from("personnel-photos")
-            .upload(fileName, arrayBuffer, {
-              contentType: "image/jpeg",
-              upsert: true,
-            });
-
-          if (error) throw error;
-
-          const { data: urlData } = await supabase.storage
-            .from("personnel-photos")
-            .getPublicUrl(data.path);
-
-          const photoUrl = urlData.publicUrl;
-
-          // Update personnel record with photo URL and fcm_token
-          const { error: dbError } = await supabase
-            .from("personnel")
-            .update({ photo_url: photoUrl, fcm_token: token })
-            .eq("id", candidate.id);
-
-          if (dbError) throw dbError;
-        } catch (photoError) {
-          console.error("Photo upload failed during registration:", photoError);
-          // Don't fail the registration if photo upload fails
-          // Just log the error and continue
-        }
-      }
-
-      return {
-        success: true,
-        message:
-          "Registration successful! Please check your email to confirm your account before logging in.",
-      };
-    } catch (err: any) {
-      console.error("Registration error", err);
-      return {
-        success: false,
-        message:
-          err.message ||
-          "An unexpected database error occurred during registration. Please try again.",
-      };
-    }
-  };
-
-  // Function to refresh personnel data from the database
-  const refreshPersonnel = useCallback(async () => {
-    if (!personnel) return;
-    try {
-      const freshPersonnel = await getPersonnelById(personnel.id);
-      if (freshPersonnel) {
-        setPersonnel(freshPersonnel);
-        // Also refresh related data
-        const assignedSched = await getScheduleByPersonnel(personnel.id);
-        if (assignedSched) {
-          setSchedule(assignedSched);
-        }
-        loadLogsAndStats();
-        updateUnsyncedCounter();
-      }
     } catch (error) {
-      console.error("Failed to refresh personnel data:", error);
+      setIsSyncing(false);
+      console.error(error);
     }
-  }, [personnel?.id, loadLogsAndStats, updateUnsyncedCounter]);
+  };
 
   return {
     personnel,
     schedule,
-    logs,
     unsyncedCount,
-    isShiftActive,
+    patrolStatus,
+
     isGpsEnabled,
     foregroundGranted,
     backgroundGranted,
     gpsLoading,
+
     isSyncing,
+    isPatrolStarting,
     autoSync,
+    is2FAEnabled,
+
     login,
     logout,
+
     toggleShift,
+
+    refreshPatrolStatus,
     syncLogsWithRemote,
-    flushSyncedCache,
-    openSystemSettings,
-    triggerEmergencySOS,
-    toggleAutoSync,
-    // toggleSilentMode,
-    is2FAEnabled,
-    // isSilentMode,
-    enable2FA,
-    disable2FA,
+
     requestForegroundPermission,
     requestBackgroundPermission,
+
     enableGpsInline,
+    openSystemSettings,
+
+    toggleAutoSync,
+
+    enable2FA,
+    disable2FA,
+
     registerUser,
     refreshPersonnel,
+
+    triggerEmergencySOS,
+
+    activeDutyType,
     setActiveDutyType,
   };
 };
