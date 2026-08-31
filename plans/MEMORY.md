@@ -1,1 +1,0 @@
-- [Enhanced Emergency SOS Features](/c:/projects/JOEMARMobileApp/.claude/projects/c--projects-JOEMARMobileApp/memory/enhanced-emergency-sos-features.md) — Proposal for notifying unit personnel on SOS trigger with emergency sounds and Google Maps directions

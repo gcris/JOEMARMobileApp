@@ -2,6 +2,7 @@ package com.pnp.geotracker
 
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -138,16 +139,42 @@ class PatrolServiceModule(
     }
 
     @ReactMethod
+
     fun uploadUnsyncedLogs(promise: Promise) {
 
+        Log.d("PatrolSync", "========================================")
+        Log.d("PatrolSync", "uploadUnsyncedLogs() CALLED")
+        Log.d("PatrolSync", "========================================")
+
         try {
+
+            Log.d("PatrolSync", "Starting syncManager.sync()...")
+
             val uploaded = syncManager.sync()
 
+            Log.d(
+                "PatrolSync",
+                "syncManager.sync() COMPLETED. Uploaded: $uploaded"
+            )
+
             promise.resolve(uploaded)
+
+            Log.d(
+                "PatrolSync",
+                "Promise resolved successfully"
+            )
+
         } catch (e: Exception) {
+
+            Log.e(
+                "PatrolSync",
+                "SYNC ERROR: ${e.message}",
+                e
+            )
 
             promise.reject(
                 "SYNC_ERROR",
+                e.message,
                 e
             )
         }

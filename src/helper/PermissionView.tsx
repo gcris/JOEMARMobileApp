@@ -1,4 +1,6 @@
-import { Alert, Text, View, TouchableOpacity } from "react-native";
+import React from "react";
+import { ActivityIndicator, Text, View, TouchableOpacity } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
 interface PermissionViewProps {
   foregroundGranted: boolean | null;
@@ -23,197 +25,469 @@ export const PermissionView = ({
   onOpenSettings,
   gpsLoading,
 }: PermissionViewProps) => {
+  const completedCount = [
+    foregroundGranted,
+    backgroundGranted,
+    isGpsEnabled,
+  ].filter(Boolean).length;
+
+  const allReady = completedCount === 3;
+
+  const colors = {
+    background: isDarkTheme ? "#111C2E" : "#F8FAFC",
+    card: isDarkTheme ? "#142035" : "#FFFFFF",
+    cardSecondary: isDarkTheme ? "#0F192A" : "#F8FAFC",
+
+    text: isDarkTheme ? "#F8FAFC" : "#0F172A",
+    muted: isDarkTheme ? "#94A3B8" : "#64748B",
+
+    border: isDarkTheme ? "#24344D" : "#E2E8F0",
+
+    primary: isDarkTheme ? "#FACC15" : "#1E3A8A",
+    primaryText: isDarkTheme ? "#0B121F" : "#FFFFFF",
+
+    success: "#10B981",
+    successBg: isDarkTheme ? "rgba(16,185,129,0.12)" : "#ECFDF5",
+
+    warning: "#F59E0B",
+    warningBg: isDarkTheme ? "rgba(245,158,11,0.12)" : "#FFFBEB",
+
+    danger: "#EF4444",
+    dangerBg: isDarkTheme ? "rgba(239,68,68,0.10)" : "#FEF2F2",
+  };
+
+  const PermissionStatusIcon = ({ enabled }: { enabled: boolean | null }) => {
+    if (enabled) {
+      return (
+        <View
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: colors.successBg,
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <Ionicons name="checkmark" size={22} color={colors.success} />
+        </View>
+      );
+    }
+
+    return (
+      <View
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: 19,
+          backgroundColor: colors.warningBg,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Ionicons name="alert-outline" size={21} color={colors.warning} />
+      </View>
+    );
+  };
+
+  const EnableButton = ({
+    onPress,
+    loading = false,
+  }: {
+    onPress: () => void;
+    loading?: boolean;
+  }) => {
+    return (
+      <TouchableOpacity
+        onPress={onPress}
+        disabled={loading}
+        activeOpacity={0.75}
+        style={{
+          minWidth: 82,
+          height: 38,
+          paddingHorizontal: 14,
+          borderRadius: 9,
+          backgroundColor: colors.primary,
+          justifyContent: "center",
+          alignItems: "center",
+          flexDirection: "row",
+        }}
+      >
+        {loading ? (
+          <>
+            <ActivityIndicator size="small" color={colors.primaryText} />
+            <Text
+              style={{
+                color: colors.primaryText,
+                fontSize: 12,
+                fontWeight: "800",
+                marginLeft: 6,
+              }}
+            >
+              WAIT
+            </Text>
+          </>
+        ) : (
+          <>
+            <Ionicons
+              name="power-outline"
+              size={15}
+              color={colors.primaryText}
+              style={{ marginRight: 5 }}
+            />
+            <Text
+              style={{
+                color: colors.primaryText,
+                fontSize: 12,
+                fontWeight: "800",
+                letterSpacing: 0.5,
+              }}
+            >
+              ENABLE
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View
       style={{
         width: "100%",
-        backgroundColor: isDarkTheme ? "#1E293B" : "#F1F5F9",
+        backgroundColor: colors.card,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: "#EF4444",
-        borderRadius: 12,
-        padding: 16,
+        borderColor: allReady ? colors.success : colors.border,
         marginBottom: 16,
+        overflow: "hidden",
       }}
     >
-      <Text
-        style={{
-          color: "#EF4444",
-          fontWeight: "bold",
-          fontSize: 20,
-          textAlign: "center",
-          marginBottom: 8,
-        }}
-      >
-        PHONE PERMISSIONS
-      </Text>
-      <Text
-        style={{
-          color: isDarkTheme ? "#94A3B8" : "#475569",
-          fontSize: 15,
-          textAlign: "center",
-          marginBottom: 12,
-          lineHeight: 16,
-        }}
-      >
-        INPPO Patrol Tracker requires active security clearances. Please grant
-        these permissions below.
-      </Text>
-
-      {/* Foreground GPS */}
+      {/* Header */}
       <View
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingVertical: 6,
-          borderBottomWidth: 1,
-          borderColor: isDarkTheme
-            ? "rgba(255,255,255,0.05)"
-            : "rgba(0,0,0,0.05)",
+          paddingHorizontal: 16,
+          paddingTop: 16,
+          paddingBottom: 14,
         }}
       >
-        <View style={{ flex: 1, marginRight: 8 }}>
-          <Text
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <View
             style={{
-              fontSize: 20,
-              fontWeight: "bold",
-              color: isDarkTheme ? "#FFFFFF" : "#0F172A",
+              flexDirection: "row",
+              alignItems: "center",
+              flex: 1,
             }}
           >
-            1. Location Access {foregroundGranted ? "✅" : "❌"}
-          </Text>
-        </View>
-        {!foregroundGranted && (
-          <TouchableOpacity
-            onPress={onRequestForeground}
+            <View
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                backgroundColor: allReady ? colors.successBg : colors.warningBg,
+                justifyContent: "center",
+                alignItems: "center",
+                marginRight: 11,
+              }}
+            >
+              <Ionicons
+                name={allReady ? "shield-checkmark" : "shield-outline"}
+                size={23}
+                color={allReady ? colors.success : colors.warning}
+              />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  color: colors.text,
+                  fontSize: 16,
+                  fontWeight: "800",
+                  letterSpacing: 0.3,
+                }}
+              >
+                System Readiness
+              </Text>
+
+              <Text
+                style={{
+                  color: colors.muted,
+                  fontSize: 12,
+                  marginTop: 2,
+                }}
+              >
+                {allReady
+                  ? "Your device is ready for patrol duty."
+                  : "Complete the required device settings."}
+              </Text>
+            </View>
+          </View>
+
+          {/* Progress badge */}
+          <View
             style={{
-              backgroundColor: "#EF4444",
+              backgroundColor: allReady ? colors.successBg : colors.warningBg,
+              paddingHorizontal: 10,
               paddingVertical: 6,
-              paddingHorizontal: 12,
-              borderRadius: 6,
+              borderRadius: 20,
+              marginLeft: 8,
             }}
           >
             <Text
               style={{
-                color: "#FFFFFF",
-                fontWeight: "bold",
-                fontSize: 15,
+                color: allReady ? colors.success : colors.warning,
+                fontSize: 12,
+                fontWeight: "800",
               }}
             >
-              ENABLE
+              {completedCount}/3 READY
             </Text>
-          </TouchableOpacity>
-        )}
+          </View>
+        </View>
+
+        {/* Progress bar */}
+        <View
+          style={{
+            height: 5,
+            backgroundColor: isDarkTheme ? "#24344D" : "#E2E8F0",
+            borderRadius: 3,
+            marginTop: 14,
+            overflow: "hidden",
+          }}
+        >
+          <View
+            style={{
+              width: `${(completedCount / 3) * 100}%`,
+              height: "100%",
+              backgroundColor: allReady ? colors.success : colors.primary,
+              borderRadius: 3,
+            }}
+          />
+        </View>
       </View>
 
-      {/* Background Location */}
+      {/* Permission list */}
       <View
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
+          borderTopWidth: 1,
+          borderTopColor: colors.border,
+          paddingHorizontal: 12,
           paddingVertical: 6,
-          borderBottomWidth: 1,
-          borderColor: isDarkTheme
-            ? "rgba(255,255,255,0.05)"
-            : "rgba(0,0,0,0.05)",
         }}
       >
-        <View style={{ flex: 1, marginRight: 8 }}>
-          <Text
+        {/* Foreground Location */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 11,
+          }}
+        >
+          <PermissionStatusIcon enabled={foregroundGranted} />
+
+          <View
             style={{
-              fontSize: 20,
-              fontWeight: "bold",
-              color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-            }}
-          >
-            2. Background Location Access {backgroundGranted ? "✅" : "❌"}
-          </Text>
-        </View>
-        {foregroundGranted && !backgroundGranted && (
-          <TouchableOpacity
-            onPress={onRequestBackground}
-            style={{
-              backgroundColor: "#EF4444",
-              paddingVertical: 6,
-              paddingHorizontal: 12,
-              borderRadius: 6,
+              flex: 1,
+              marginLeft: 11,
+              marginRight: 8,
             }}
           >
             <Text
               style={{
-                color: "#FFFFFF",
-                fontWeight: "bold",
-                fontSize: 15,
+                color: colors.text,
+                fontSize: 14,
+                fontWeight: "700",
               }}
             >
-              ENABLE
+              Location Access
             </Text>
-          </TouchableOpacity>
-        )}
-      </View>
 
-      {/* System GPS */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingVertical: 6,
-        }}
-      >
-        <View style={{ flex: 1, marginRight: 8 }}>
-          <Text
-            style={{
-              fontSize: 20,
-              fontWeight: "bold",
-              color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-            }}
-          >
-            3. Enable Location {isGpsEnabled ? "✅" : "❌"}
-          </Text>
+            <Text
+              style={{
+                color: foregroundGranted ? colors.success : colors.muted,
+                fontSize: 11,
+                marginTop: 2,
+              }}
+            >
+              {foregroundGranted
+                ? "Permission granted"
+                : "Required to track your patrol"}
+            </Text>
+          </View>
+
+          {!foregroundGranted && (
+            <EnableButton
+              onPress={() => {
+                void onRequestForeground();
+              }}
+            />
+          )}
         </View>
-        {!isGpsEnabled && (
-          <TouchableOpacity
-            onPress={async () => {
-              // 1. Trigger the system prompt to turn on GPS
-              await onEnableGpsInline();
 
-              // 2. Introduce a brief delay (e.g., 500ms) to let the hardware state update
-              await new Promise((resolve) => setTimeout(resolve, 1000));
+        {/* Divider */}
+        <View
+          style={{
+            height: 1,
+            backgroundColor: colors.border,
+            marginLeft: 49,
+          }}
+        />
 
-              // 3. Re-check your actual state variable (e.g., isGpsEnabled)
-              //   if (!flag) {
-              //     Alert.alert(
-              //       "Permission Fallback",
-              //       "Could not auto-enable device location. Please configure it via the device system settings.",
-              //       [
-              //         { text: "Open Settings", onPress: onOpenSettings },
-              //         { text: "Cancel", style: "cancel" },
-              //       ],
-              //     );
-              //   }
-            }}
-            disabled={gpsLoading}
+        {/* Background Location */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 11,
+          }}
+        >
+          <PermissionStatusIcon enabled={backgroundGranted} />
+
+          <View
             style={{
-              backgroundColor: "#EF4444",
-              paddingVertical: 6,
-              paddingHorizontal: 12,
-              borderRadius: 6,
+              flex: 1,
+              marginLeft: 11,
+              marginRight: 8,
             }}
           >
             <Text
               style={{
-                color: "#FFFFFF",
-                fontWeight: "bold",
-                fontSize: 15,
+                color: colors.text,
+                fontSize: 14,
+                fontWeight: "700",
               }}
             >
-              {gpsLoading ? "Initializing..." : "ENABLE"}
+              Background Location
             </Text>
-          </TouchableOpacity>
-        )}
+
+            <Text
+              style={{
+                color: backgroundGranted ? colors.success : colors.muted,
+                fontSize: 11,
+                marginTop: 2,
+              }}
+            >
+              {backgroundGranted
+                ? "Background tracking enabled"
+                : foregroundGranted
+                  ? "Required for continuous patrol tracking"
+                  : "Complete Location Access first"}
+            </Text>
+          </View>
+
+          {foregroundGranted && !backgroundGranted && (
+            <EnableButton
+              onPress={() => {
+                void onRequestBackground();
+              }}
+            />
+          )}
+        </View>
+
+        {/* Divider */}
+        <View
+          style={{
+            height: 1,
+            backgroundColor: colors.border,
+            marginLeft: 49,
+          }}
+        />
+
+        {/* GPS */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 11,
+          }}
+        >
+          <PermissionStatusIcon enabled={isGpsEnabled} />
+
+          <View
+            style={{
+              flex: 1,
+              marginLeft: 11,
+              marginRight: 8,
+            }}
+          >
+            <Text
+              style={{
+                color: colors.text,
+                fontSize: 14,
+                fontWeight: "700",
+              }}
+            >
+              Device Location / GPS
+            </Text>
+
+            <Text
+              style={{
+                color: isGpsEnabled ? colors.success : colors.muted,
+                fontSize: 11,
+                marginTop: 2,
+              }}
+            >
+              {isGpsEnabled
+                ? "GPS is currently active"
+                : "Turn on GPS to determine your position"}
+            </Text>
+          </View>
+
+          {!isGpsEnabled && (
+            <EnableButton
+              loading={gpsLoading}
+              onPress={() => {
+                void onEnableGpsInline();
+              }}
+            />
+          )}
+        </View>
       </View>
+
+      {/* Bottom information */}
+      {!allReady && (
+        <View
+          style={{
+            backgroundColor: colors.cardSecondary,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            paddingHorizontal: 16,
+            paddingVertical: 11,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "flex-start",
+            }}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={16}
+              color={colors.muted}
+              style={{ marginTop: 1, marginRight: 7 }}
+            />
+
+            <Text
+              style={{
+                flex: 1,
+                color: colors.muted,
+                fontSize: 11,
+                lineHeight: 16,
+              }}
+            >
+              These settings are required for accurate patrol location recording
+              and continuous GPS tracking.
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 };

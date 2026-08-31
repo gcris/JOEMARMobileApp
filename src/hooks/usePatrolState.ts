@@ -160,7 +160,6 @@ export const usePatrolState = () => {
       setPatrolStatus(status);
       setIsShiftActive(status.running);
       setUnsyncedCount(status.unsyncedLocations);
-      console.log("status.dutyType: ", status.dutyType);
       setActiveDutyType(status.dutyType);
     } catch (e) {
       console.warn(e);
@@ -342,17 +341,17 @@ export const usePatrolState = () => {
     return () => clearInterval(timer);
   }, [refreshPatrolStatus]);
 
-  const toggleAutoSync = async () => {
-    try {
-      const next = !autoSync;
+  // const toggleAutoSync = async () => {
+  //   try {
+  //     const next = !autoSync;
 
-      setAutoSync(next);
+  //     setAutoSync(next);
 
-      await AsyncStorage.setItem("@pnp_auto_sync", String(next));
-    } catch (e) {
-      console.warn(e);
-    }
-  };
+  //     await AsyncStorage.setItem("@pnp_auto_sync", String(next));
+  //   } catch (e) {
+  //     console.warn(e);
+  //   }
+  // };
 
   const checkIfWithinScheduledTime = useCallback(() => {
     if (!schedule || schedule.length === 0) {
@@ -1052,7 +1051,7 @@ export const usePatrolState = () => {
     enableGpsInline,
     openSystemSettings,
 
-    toggleAutoSync,
+    // toggleAutoSync,
 
     enable2FA,
     disable2FA,

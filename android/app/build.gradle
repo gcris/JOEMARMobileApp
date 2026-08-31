@@ -123,7 +123,7 @@ android {
         versionCode 1
         versionName "1.0.0"
         buildConfigField "String", "SUPABASE_URL", "\"https://wxqbngmfovgqpyboriru.supabase.co\""
-        buildConfigField "String", "SUPABASE_ANON_KEY", "\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4cWJuZ21mb3ZncXB5Ym9yaXJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNTEyMDcsImV4cCI6MjA5NTYyNzIwN30.eI7XWhwmyEbuMvYwX-sEF0lGJD-hImZ67lboX-zVthE\""
+        buildConfigField "String", "SUPABASE_ANON_KEY", "\"sb_publishable_tFIjf-pGREoOalDqo4JwAQ_8VfPK1Tu\""
     }
     signingConfigs {
         debug {

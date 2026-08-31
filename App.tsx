@@ -57,69 +57,67 @@ export default function App() {
   const patrolState = usePatrolState();
 
   // Restore patrol state on app startup
-  React.useEffect(() => {
-    const restorePatrolState = async () => {
-      if (restoreAttempted) return; // Prevent multiple restore attempts
+  // React.useEffect(() => {
+  //   const restorePatrolState = async () => {
+  //     if (restoreAttempted) return; // Prevent multiple restore attempts
 
-      setRestoreAttempted(true);
+  //     setRestoreAttempted(true);
 
-      try {
-        // Import BackgroundTracker here to avoid circular dependency issues
-        const PATROL_STATE_KEY = "@pnp_patrol_active";
-        const PATROL_START_TIME_KEY = "@pnp_patrol_start_time";
-        const LAST_KNOWN_LOCATION_KEY = "@pnp_last_known_location";
+  //     try {
+  //       // Import BackgroundTracker here to avoid circular dependency issues
+  //       const PATROL_STATE_KEY = "@pnp_patrol_active";
+  //       const PATROL_START_TIME_KEY = "@pnp_patrol_start_time";
+  //       const LAST_KNOWN_LOCATION_KEY = "@pnp_last_known_location";
 
-        // Check if patrol should be active (survives process recreation)
-        const patrolActive =
-          (await AsyncStorage.getItem(PATROL_STATE_KEY)) === "true";
+  //       // Check if patrol should be active (survives process recreation)
+  //       const patrolActive =
+  //         (await AsyncStorage.getItem(PATROL_STATE_KEY)) === "true";
 
-        console.log("[App] Patrol active from storage:", patrolActive);
+  //       console.log("[App] Patrol active from storage:", patrolActive);
 
-        if (patrolActive) {
-          // Restore UI state to match actual background service status
-          const personnelId = await AsyncStorage.getItem(
-            "@pnp_active_personnel_id",
-          );
-          const startTime = await AsyncStorage.getItem(PATROL_START_TIME_KEY);
-          const lastLocationJson = await AsyncStorage.getItem(
-            LAST_KNOWN_LOCATION_KEY,
-          );
+  //       if (patrolActive) {
+  //         // Restore UI state to match actual background service status
+  //         const personnelId = await ;
+  //         const startTime = await AsyncStorage.getItem(PATROL_START_TIME_KEY);
+  //         const lastLocationJson = await AsyncStorage.getItem(
+  //           LAST_KNOWN_LOCATION_KEY,
+  //         );
 
-          // Update patrol state if we have personnel ID
-          if (personnelId) {
-            console.log("[App] Restoring patrol for personnel:", personnelId);
-            console.log("[App] Patrol started at:", startTime);
-            console.log("[App] Last known location:", lastLocationJson);
+  //         // Update patrol state if we have personnel ID
+  //         if (personnelId) {
+  //           console.log("[App] Restoring patrol for personnel:", personnelId);
+  //           console.log("[App] Patrol started at:", startTime);
+  //           console.log("[App] Last known location:", lastLocationJson);
 
-            // Verify location tracking is still active
-            // const started = await Location.hasStartedLocationUpdatesAsync(
-            //   BackgroundTracker.LOCATION_TASK_NAME,
-            // );
+  //           // Verify location tracking is still active
+  //           // const started = await Location.hasStartedLocationUpdatesAsync(
+  //           //   BackgroundTracker.LOCATION_TASK_NAME,
+  //           // );
 
-            // if (!started) {
-            //   // Restart tracking if it was interrupted by process kill
-            //   console.log(
-            //     "[App] Restarting location tracking after process restore",
-            //   );
-            //   await BackgroundTracker.startBackgroundUpdates();
-            // } else {
-            //   console.log("[App] Location tracking already active");
-            // }
-          }
-        }
-      } catch (error) {
-        console.error("[App] Failed to restore patrol state:", error);
-      } finally {
-        // CRITICAL: Always finish initialization to hide splash screen
-        setIsInitializing(false);
-      }
-    };
+  //           // if (!started) {
+  //           //   // Restart tracking if it was interrupted by process kill
+  //           //   console.log(
+  //           //     "[App] Restarting location tracking after process restore",
+  //           //   );
+  //           //   await BackgroundTracker.startBackgroundUpdates();
+  //           // } else {
+  //           //   console.log("[App] Location tracking already active");
+  //           // }
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.error("[App] Failed to restore patrol state:", error);
+  //     } finally {
+  //       // CRITICAL: Always finish initialization to hide splash screen
+  //       setIsInitializing(false);
+  //     }
+  //   };
 
-    // Start restoration after a brief delay to let other initializations complete
-    const timer = setTimeout(restorePatrolState, 500);
+  //   // Start restoration after a brief delay to let other initializations complete
+  //   const timer = setTimeout(restorePatrolState, 500);
 
-    return () => clearTimeout(timer);
-  }, [restoreAttempted]); // Only run once
+  //   return () => clearTimeout(timer);
+  // }, [restoreAttempted]); // Only run once
 
   const {
     personnel,
@@ -200,7 +198,7 @@ export default function App() {
           sosAlertData={sosAlertData}
           onClose={() => {
             setSosAlertData(null);
-            AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
+            // AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
           }}
         />
       </NavigationContainer>
@@ -225,7 +223,7 @@ export default function App() {
               sosAlertData={sosAlertData}
               onSosAlertClose={() => {
                 setSosAlertData(null);
-                AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
+                // AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
               }}
             />
           )}
@@ -237,7 +235,7 @@ export default function App() {
         sosAlertData={sosAlertData}
         onClose={() => {
           setSosAlertData(null);
-          AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
+          // AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
         }}
       />
     </NavigationContainer>
@@ -281,7 +279,7 @@ function MainApp({
     openSystemSettings,
     triggerEmergencySOS,
     autoSync,
-    toggleAutoSync,
+    // toggleAutoSync,
     is2FAEnabled,
     enable2FA,
     disable2FA,
@@ -341,7 +339,7 @@ function MainApp({
         onOpenSettings={openSystemSettings}
         onEmergencySOS={triggerEmergencySOS}
         autoSync={autoSync}
-        onToggleAutoSync={toggleAutoSync}
+        // onToggleAutoSync={toggleAutoSync}
         is2FAEnabled={is2FAEnabled}
         onEnable2FA={enable2FA}
         onDisable2FA={disable2FA}

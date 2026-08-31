@@ -1,6 +1,5 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { Personnel, Schedule, PersonnelLog } from "../types";
-import * as SQLite from "expo-sqlite";
 import NetInfo from "@react-native-community/netinfo";
 
 const checkInternetBeforeAction = async (): Promise<boolean | null> => {
