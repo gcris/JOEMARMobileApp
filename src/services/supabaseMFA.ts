@@ -33,7 +33,7 @@ export const enrollMFA = async (email: string) => {
     // No factor exists, create a new one
     const { data, error } = await supabase.auth.mfa.enroll({
       factorType: "totp",
-      friendlyName: "Project J.O.E.M.A.R",
+      friendlyName: "Project P.A.T.R.O.L",
     });
 
     if (error) {
@@ -179,7 +179,7 @@ export const unenrollMFA = async (factorId: string): Promise<boolean> => {
  * (allows users who want to print or construct their own uri QR generator)
  */
 export function getOTPAuthUri(badge: string, secret: string): string {
-  const label = encodeURIComponent(`Project J.O.E.M.A.R (${badge})`);
+  const label = encodeURIComponent(`Project P.A.T.R.O.L (${badge})`);
   const issuer = encodeURIComponent("INPPO");
   return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
 }

@@ -9,21 +9,22 @@ import {
   Linking,
   StyleSheet,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { Personnel, Schedule } from "../types";
+import { Personnel, Schedule, PersonnelLog } from "../types";
 import { getStyles, getThemeColors } from "../theme/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import FontAwesome from "@expo/vector-icons/FontAwesome6";
 import { PermissionView } from "../helper/PermissionView";
 import { ScrollView } from "react-native-gesture-handler";
 import { AccountScreen } from "./AccountScreen";
+import PersonnelLogMapScreen from "./PersonnelLogMapScreen";
+import PatrolSummaryScreen from "./PatrolSummaryScreen";
 
 const DUTY_TYPES = [
-  "Foot Patrol",
-  "Mobile Patrol",
-  "TMRU Patrol",
-  "Bike Patrol",
-  "Seaborne Patrol",
+  "Foot Patrolling",
+  "Mobile Patrolling",
+  "TMRU Patrolling",
+  "Bike Patrolling",
+  "Seaborne Patrolling",
   "Checkpoint",
   "Special Event",
   "Simulation Exercise",
@@ -35,6 +36,7 @@ const DUTY_TYPES = [
 interface DashboardViewProps {
   personnel: Personnel | null;
   schedule: Schedule[] | null;
+  personnelLogs: PersonnelLog[];
   isShiftActive: boolean;
   isGpsEnabled: boolean;
   unsyncedCount: number;
@@ -43,7 +45,7 @@ interface DashboardViewProps {
   onToggleShift: () => void;
   onSync: () => void;
   onOpenSettings: () => void;
-  onEmergencySOS: () => void;
+  onEmergencySOS: () => Promise<boolean>;
 
   autoSync: boolean;
   is2FAEnabled: boolean;
@@ -68,6 +70,7 @@ interface DashboardViewProps {
 export const DashboardView = ({
   personnel,
   schedule,
+  personnelLogs,
   isShiftActive,
   isGpsEnabled,
   unsyncedCount,
@@ -88,16 +91,30 @@ export const DashboardView = ({
 }: DashboardViewProps) => {
   const themeStyles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
-  const navigation = useNavigation<any>();
 
-  const [activeNav, setActiveNav] = useState<"home" | "sos" | "account">(
-    "home",
-  );
+  const [activeNav, setActiveNav] = useState<
+    "home" | "sos" | "account" | "recent_logs" | "patrol_summary"
+  >("home");
 
   const [selectedDutyType, setSelectedDutyType] =
-    useState<string>("Foot Patrol");
+    useState<string>("Foot Patrolling");
 
   const [showDropdown, setShowDropdown] = useState(false);
+
+  const theme = {
+    background: isDarkTheme ? "#0B121F" : "#F8FAFC",
+    card: isDarkTheme ? "#142035" : "#FFFFFF",
+    cardSecondary: isDarkTheme ? "#1E293B" : "#F1F5F9",
+    input: isDarkTheme ? "#0F172A" : "#F8FAFC",
+    border: isDarkTheme ? "#263449" : "#E2E8F0",
+    text: isDarkTheme ? "#F8FAFC" : "#0F172A",
+    secondary: isDarkTheme ? "#94A3B8" : "#64748B",
+    muted: isDarkTheme ? "#64748B" : "#94A3B8",
+    primary: isDarkTheme ? "#FACC15" : "#1E3A8A",
+    primaryText: isDarkTheme ? "#0B121F" : "#FFFFFF",
+    success: "#10B981",
+    danger: "#EF4444",
+  };
 
   useEffect(() => {
     if (activeDutyType) {
@@ -222,1221 +239,1312 @@ export const DashboardView = ({
       ]}
     >
       {/* ================================================================ */}
-      {/* MAIN DASHBOARD SCROLL                                            */}
+      {/* MAIN CONTENT                                                     */}
       {/* ================================================================ */}
 
-      <ScrollView
-        style={[
-          themeStyles.container,
-          {
-            zIndex: 1,
-          },
-        ]}
-        contentContainerStyle={[
-          localStyles.scrollContent,
-          {
-            paddingBottom: 105,
-          },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled={true}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ================================================================ */}
-        {/* HOME                                                              */}
-        {/* ================================================================ */}
+      {activeNav === "recent_logs" ? (
+        <View style={localStyles.recentLogsContainer}>
+          <PersonnelLogMapScreen
+            logs={personnelLogs}
+            isDarkTheme={isDarkTheme}
+          />
+        </View>
+      ) : (
+        <ScrollView
+          style={[
+            themeStyles.container,
+            {
+              zIndex: 1,
+            },
+          ]}
+          contentContainerStyle={[
+            localStyles.scrollContent,
+            {
+              paddingBottom: 105,
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ================================================================ */}
+          {/* HEADER */}
+          {/* ================================================================ */}
 
-        {activeNav === "home" && (
-          <View style={localStyles.mainContent}>
-            {/* ------------------------------------------------------------ */}
-            {/* PERMISSIONS                                                   */}
-            {/* ------------------------------------------------------------ */}
-
-            {(!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
-              <PermissionView
-                foregroundGranted={foregroundGranted}
-                backgroundGranted={backgroundGranted}
-                isGpsEnabled={isGpsEnabled}
-                isDarkTheme={isDarkTheme}
-                onRequestForeground={onRequestForeground}
-                onRequestBackground={onRequestBackground}
-                onEnableGpsInline={onEnableGpsInline}
-                onOpenSettings={onOpenSettings}
-                gpsLoading={false}
-              />
-            )}
-
-            {/* ------------------------------------------------------------ */}
-            {/* PATROL TRACKER                                                */}
-            {/* ------------------------------------------------------------ */}
-
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 18,
+            }}
+          >
             <View
-              style={[
-                localStyles.trackerCard,
-                {
-                  backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
-                  borderColor: isShiftActive
-                    ? "#22C55E"
-                    : isDarkTheme
-                      ? "#263449"
-                      : "#E2E8F0",
-                },
-              ]}
+              style={{
+                flex: 1,
+                marginLeft: 13,
+              }}
             >
-              <View style={localStyles.sectionHeader}>
-                <View
-                  style={[
-                    localStyles.sectionIcon,
-                    {
-                      backgroundColor: isShiftActive
-                        ? "rgba(34,197,94,0.12)"
-                        : isDarkTheme
-                          ? "#1E293B"
-                          : "#EFF6FF",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="navigate-outline"
-                    size={22}
-                    color={
-                      isShiftActive
-                        ? "#22C55E"
-                        : isDarkTheme
-                          ? "#FACC15"
-                          : "#1E3A8A"
-                    }
-                  />
-                </View>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.5}
+                style={{
+                  fontSize: 23,
+                  fontWeight: "800",
+                  color: theme.text,
+                }}
+              >
+                Welcome, {personnel?.rank?.rank_name} {personnel?.fullname}!
+              </Text>
 
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      localStyles.sectionTitle,
-                      {
-                        color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                      },
-                    ]}
-                  >
-                    Patrol Tracker
-                  </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontSize: 17,
+                  color: theme.secondary,
+                  marginTop: 2,
+                }}
+              >
+                Dashboard Overview
+              </Text>
+            </View>
+          </View>
 
-                  <Text
-                    style={[
-                      localStyles.sectionSubtitle,
-                      {
-                        color: colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    {isShiftActive
-                      ? "Location tracking is currently active."
-                      : "Start a patrol to begin location tracking."}
-                  </Text>
-                </View>
+          {/* ================================================================ */}
+          {/* HOME                                                              */}
+          {/* ================================================================ */}
 
-                <View
-                  style={[
-                    localStyles.liveIndicator,
-                    {
-                      backgroundColor: isShiftActive
-                        ? "rgba(34,197,94,0.12)"
-                        : isDarkTheme
-                          ? "#1E293B"
-                          : "#F1F5F9",
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      localStyles.liveDot,
-                      {
-                        backgroundColor: isShiftActive ? "#22C55E" : "#64748B",
-                      },
-                    ]}
-                  />
+          {activeNav === "home" && (
+            <View style={localStyles.mainContent}>
+              {/* ------------------------------------------------------------ */}
+              {/* PERMISSIONS                                                   */}
+              {/* ------------------------------------------------------------ */}
 
-                  <Text
-                    style={[
-                      localStyles.liveText,
-                      {
-                        color: isShiftActive ? "#22C55E" : colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    {isShiftActive ? "LIVE" : "READY"}
-                  </Text>
-                </View>
-              </View>
+              {(!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
+                <PermissionView
+                  foregroundGranted={foregroundGranted}
+                  backgroundGranted={backgroundGranted}
+                  isGpsEnabled={isGpsEnabled}
+                  isDarkTheme={isDarkTheme}
+                  onRequestForeground={onRequestForeground}
+                  onRequestBackground={onRequestBackground}
+                  onEnableGpsInline={onEnableGpsInline}
+                  onOpenSettings={onOpenSettings}
+                  gpsLoading={false}
+                />
+              )}
+
+              {/* ------------------------------------------------------------ */}
+              {/* PATROL TRACKER                                                */}
+              {/* ------------------------------------------------------------ */}
 
               <View
                 style={[
-                  localStyles.trackerNotice,
+                  localStyles.trackerCard,
                   {
-                    backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
-                    borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                    backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
+                    borderColor: isShiftActive
+                      ? "#22C55E"
+                      : isDarkTheme
+                        ? "#263449"
+                        : "#E2E8F0",
                   },
                 ]}
               >
-                <Ionicons
-                  name="information-circle-outline"
-                  size={18}
-                  color={colors.textSecondary}
-                />
+                <View style={localStyles.sectionHeader}>
+                  <View
+                    style={[
+                      localStyles.sectionIcon,
+                      {
+                        backgroundColor: isShiftActive
+                          ? "rgba(34,197,94,0.12)"
+                          : isDarkTheme
+                            ? "#1E293B"
+                            : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="navigate-outline"
+                      size={22}
+                      color={
+                        isShiftActive
+                          ? "#22C55E"
+                          : isDarkTheme
+                            ? "#FACC15"
+                            : "#1E3A8A"
+                      }
+                    />
+                  </View>
 
-                <Text
-                  style={[
-                    localStyles.trackerNoticeText,
-                    {
-                      color: colors.textSecondary,
-                    },
-                  ]}
-                >
-                  When active, your coordinates are recorded locally and
-                  tracking continues while the screen is minimized.
-                </Text>
-              </View>
-
-              {/* ---------------------------------------------------------- */}
-              {/* DUTY TYPE                                                    */}
-              {/* ---------------------------------------------------------- */}
-
-              <Text
-                style={[
-                  localStyles.inputLabel,
-                  {
-                    color: isDarkTheme ? "#CBD5E1" : "#334155",
-                  },
-                ]}
-              >
-                PATROL DUTY TYPE
-              </Text>
-
-              <View style={localStyles.dutyDropdownWrapper}>
-                {/* SELECTED DUTY BUTTON */}
-
-                <TouchableOpacity
-                  onPress={() => setShowDropdown((previous) => !previous)}
-                  disabled={isShiftActive}
-                  activeOpacity={0.8}
-                  style={[
-                    localStyles.dutySelector,
-                    {
-                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
-                      borderColor: showDropdown
-                        ? isDarkTheme
-                          ? "#FACC15"
-                          : "#1E3A8A"
-                        : isDarkTheme
-                          ? "#334155"
-                          : "#CBD5E1",
-                      opacity: isShiftActive ? 0.55 : 1,
-                    },
-                  ]}
-                >
-                  <View style={localStyles.dutySelectorLeft}>
-                    <View
+                  <View style={{ flex: 1 }}>
+                    <Text
                       style={[
-                        localStyles.dutyIcon,
+                        localStyles.sectionTitle,
                         {
-                          backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="walk-outline"
-                        size={19}
-                        color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                      />
-                    </View>
+                      Patrol Tracker
+                    </Text>
 
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          localStyles.dutySmallText,
-                          {
-                            color: colors.textSecondary,
-                          },
-                        ]}
-                      >
-                        SELECTED DUTY
-                      </Text>
-
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          localStyles.dutyValue,
-                          {
-                            color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                          },
-                        ]}
-                      >
-                        {selectedDutyType}
-                      </Text>
-                    </View>
+                    <Text
+                      style={[
+                        localStyles.sectionSubtitle,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {isShiftActive
+                        ? "Location tracking is currently active."
+                        : "Start a patrol to begin location tracking."}
+                    </Text>
                   </View>
 
-                  <Ionicons
-                    name={showDropdown ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-
-                {/* DROPDOWN */}
-
-                {showDropdown && !isShiftActive && (
                   <View
                     style={[
-                      localStyles.dropdownMenu,
+                      localStyles.liveIndicator,
                       {
-                        backgroundColor: isDarkTheme ? "#172235" : "#FFFFFF",
-                        borderColor: isDarkTheme ? "#334155" : "#CBD5E1",
+                        backgroundColor: isShiftActive
+                          ? "rgba(34,197,94,0.12)"
+                          : isDarkTheme
+                            ? "#1E293B"
+                            : "#F1F5F9",
                       },
                     ]}
                   >
-                    <ScrollView
-                      nestedScrollEnabled={true}
-                      scrollEnabled={true}
-                      showsVerticalScrollIndicator={true}
-                      keyboardShouldPersistTaps="handled"
-                      bounces={false}
-                      style={localStyles.dropdownScroll}
-                      contentContainerStyle={localStyles.dropdownScrollContent}
-                    >
-                      {DUTY_TYPES.map((dutyType) => {
-                        const selected = selectedDutyType === dutyType;
-
-                        return (
-                          <TouchableOpacity
-                            key={dutyType}
-                            onPress={() => {
-                              setSelectedDutyType(dutyType);
-                              setActiveDutyType(dutyType);
-                              setShowDropdown(false);
-                            }}
-                            activeOpacity={0.75}
-                            style={[
-                              localStyles.dropdownItem,
-                              {
-                                backgroundColor: selected
-                                  ? isDarkTheme
-                                    ? "#263449"
-                                    : "#EFF6FF"
-                                  : "transparent",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                localStyles.dropdownItemText,
-                                {
-                                  color: selected
-                                    ? isDarkTheme
-                                      ? "#FACC15"
-                                      : "#1E3A8A"
-                                    : isDarkTheme
-                                      ? "#E2E8F0"
-                                      : "#334155",
-                                },
-                              ]}
-                            >
-                              {dutyType}
-                            </Text>
-
-                            {selected && (
-                              <Ionicons
-                                name="checkmark"
-                                size={18}
-                                color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                              />
-                            )}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                )}
-              </View>
-
-              {/* ---------------------------------------------------------- */}
-              {/* START / STOP PATROL                                         */}
-              {/* ---------------------------------------------------------- */}
-
-              <TouchableOpacity
-                style={[
-                  localStyles.patrolButton,
-                  {
-                    backgroundColor: isShiftActive ? "#DC2626" : "#16A34A",
-                    opacity: isPatrolStarting ? 0.7 : 1,
-                  },
-                ]}
-                disabled={isPatrolStarting}
-                activeOpacity={0.85}
-                onPress={confirmPatrolToggle}
-              >
-                {isPatrolStarting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <View style={localStyles.patrolButtonIcon}>
-                      <Ionicons
-                        name={
-                          isShiftActive
-                            ? "stop-circle-outline"
-                            : "play-circle-outline"
-                        }
-                        size={32}
-                        color="#FFFFFF"
-                      />
-                    </View>
-
-                    <View>
-                      <Text style={localStyles.patrolButtonTitle}>
-                        {isShiftActive ? "STOP PATROL" : "START PATROL"}
-                      </Text>
-
-                      <Text style={localStyles.patrolButtonSubtitle}>
-                        {isShiftActive
-                          ? "End current tracking session"
-                          : `Begin ${selectedDutyType}`}
-                      </Text>
-                    </View>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {/* ============================================================ */}
-            {/* SYNC CARD                                                     */}
-            {/* ============================================================ */}
-
-            <View
-              style={[
-                localStyles.syncCard,
-                {
-                  backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
-                  borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
-                },
-              ]}
-            >
-              <View style={localStyles.sectionHeader}>
-                <View
-                  style={[
-                    localStyles.sectionIcon,
-                    {
-                      backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="cloud-upload-outline"
-                    size={22}
-                    color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                  />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      localStyles.sectionTitle,
-                      {
-                        color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                      },
-                    ]}
-                  >
-                    Data Synchronization
-                  </Text>
-
-                  <Text
-                    style={[
-                      localStyles.sectionSubtitle,
-                      {
-                        color: colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    Patrol records waiting to upload
-                  </Text>
-                </View>
-              </View>
-
-              <View
-                style={[
-                  localStyles.syncStatus,
-                  {
-                    backgroundColor:
-                      unsyncedCount > 0
-                        ? isDarkTheme
-                          ? "#291D0A"
-                          : "#FFFBEB"
-                        : isDarkTheme
-                          ? "#10251B"
-                          : "#F0FDF4",
-                    borderColor: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
-                  },
-                ]}
-              >
-                <View>
-                  <Text
-                    style={[
-                      localStyles.syncCount,
-                      {
-                        color: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
-                      },
-                    ]}
-                  >
-                    {unsyncedCount}
-                  </Text>
-
-                  <Text
-                    style={[
-                      localStyles.syncCountLabel,
-                      {
-                        color: colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    {unsyncedCount === 1 ? "pending log" : "pending logs"}
-                  </Text>
-                </View>
-
-                <View style={localStyles.syncStatusRight}>
-                  <Ionicons
-                    name={
-                      unsyncedCount > 0
-                        ? "cloud-upload-outline"
-                        : "cloud-done-outline"
-                    }
-                    size={25}
-                    color={unsyncedCount > 0 ? "#F59E0B" : "#22C55E"}
-                  />
-
-                  <Text
-                    style={[
-                      localStyles.syncStatusText,
-                      {
-                        color: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
-                      },
-                    ]}
-                  >
-                    {unsyncedCount > 0 ? "WAITING TO SYNC" : "ALL SYNCED"}
-                  </Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  localStyles.syncButton,
-                  {
-                    backgroundColor:
-                      unsyncedCount > 0
-                        ? isDarkTheme
-                          ? "#FACC15"
-                          : "#1E3A8A"
-                        : isDarkTheme
-                          ? "#1E293B"
-                          : "#F1F5F9",
-                    borderColor: isDarkTheme ? "#334155" : "#E2E8F0",
-                    opacity: isSyncing || unsyncedCount === 0 ? 0.65 : 1,
-                  },
-                ]}
-                onPress={onSync}
-                disabled={isSyncing || unsyncedCount === 0}
-                activeOpacity={0.8}
-              >
-                {isSyncing ? (
-                  <ActivityIndicator
-                    size="small"
-                    color={isDarkTheme ? "#0B121F" : "#FFFFFF"}
-                  />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="sync-outline"
-                      size={20}
-                      color={
-                        unsyncedCount > 0
-                          ? isDarkTheme
-                            ? "#0B121F"
-                            : "#FFFFFF"
-                          : colors.textSecondary
-                      }
+                    <View
+                      style={[
+                        localStyles.liveDot,
+                        {
+                          backgroundColor: isShiftActive
+                            ? "#22C55E"
+                            : "#64748B",
+                        },
+                      ]}
                     />
 
                     <Text
                       style={[
-                        localStyles.syncButtonText,
+                        localStyles.liveText,
                         {
-                          color:
-                            unsyncedCount > 0
-                              ? isDarkTheme
-                                ? "#0B121F"
-                                : "#FFFFFF"
-                              : colors.textSecondary,
+                          color: isShiftActive
+                            ? "#22C55E"
+                            : colors.textSecondary,
                         },
                       ]}
                     >
-                      {unsyncedCount > 0
-                        ? "SYNC PATROL LOGS"
-                        : "NOTHING TO SYNC"}
+                      {isShiftActive ? "LIVE" : "READY"}
                     </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
+                  </View>
+                </View>
 
-            {/* ============================================================ */}
-            {/* PATROL SCHEDULE                                               */}
-            {/* ============================================================ */}
-
-            <View
-              style={[
-                localStyles.scheduleCard,
-                {
-                  backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
-                  borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
-                },
-              ]}
-            >
-              <View style={localStyles.sectionHeader}>
                 <View
                   style={[
-                    localStyles.sectionIcon,
+                    localStyles.trackerNotice,
                     {
-                      backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                      borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
                     },
                   ]}
                 >
                   <Ionicons
-                    name="calendar-outline"
-                    size={22}
-                    color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                    name="information-circle-outline"
+                    size={18}
+                    color={colors.textSecondary}
                   />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      localStyles.sectionTitle,
-                      {
-                        color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                      },
-                    ]}
-                  >
-                    Patrol Schedule
-                  </Text>
 
                   <Text
                     style={[
-                      localStyles.sectionSubtitle,
+                      localStyles.trackerNoticeText,
                       {
                         color: colors.textSecondary,
                       },
                     ]}
                   >
-                    Your assigned duties and personnel
+                    When active, your coordinates are recorded locally and
+                    tracking continues while the screen is minimized.
                   </Text>
                 </View>
 
-                <View
+                {/* ---------------------------------------------------------- */}
+                {/* DUTY TYPE                                                    */}
+                {/* ---------------------------------------------------------- */}
+
+                <Text
                   style={[
-                    localStyles.scheduleCount,
+                    localStyles.inputLabel,
                     {
-                      backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      color: isDarkTheme ? "#CBD5E1" : "#334155",
                     },
                   ]}
                 >
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: "900",
-                      color: isDarkTheme ? "#FACC15" : "#1E3A8A",
-                    }}
+                  PATROL DUTY TYPE
+                </Text>
+
+                <View style={localStyles.dutyDropdownWrapper}>
+                  {/* SELECTED DUTY BUTTON */}
+
+                  <TouchableOpacity
+                    onPress={() => setShowDropdown((previous) => !previous)}
+                    disabled={isShiftActive}
+                    activeOpacity={0.8}
+                    style={[
+                      localStyles.dutySelector,
+                      {
+                        backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                        borderColor: showDropdown
+                          ? isDarkTheme
+                            ? "#FACC15"
+                            : "#1E3A8A"
+                          : isDarkTheme
+                            ? "#334155"
+                            : "#CBD5E1",
+                        opacity: isShiftActive ? 0.55 : 1,
+                      },
+                    ]}
                   >
-                    {schedule?.length || 0}
-                  </Text>
-                </View>
-              </View>
+                    <View style={localStyles.dutySelectorLeft}>
+                      <View
+                        style={[
+                          localStyles.dutyIcon,
+                          {
+                            backgroundColor: isDarkTheme
+                              ? "#1E293B"
+                              : "#EFF6FF",
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="walk-outline"
+                          size={19}
+                          color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                        />
+                      </View>
 
-              {schedule && schedule.length > 0 ? (
-                <View style={{ marginTop: 4 }}>
-                  {schedule.map((item, index) => (
-                    <View
-                      key={item.id || index}
-                      style={[
-                        localStyles.scheduleItem,
-                        {
-                          backgroundColor: isDarkTheme ? "#172235" : "#F8FAFC",
-                          borderColor: isDarkTheme ? "#334155" : "#E2E8F0",
-                        },
-                      ]}
-                    >
-                      {/* Schedule Header */}
-
-                      <View style={localStyles.scheduleItemHeader}>
-                        <View
+                      <View style={{ flex: 1 }}>
+                        <Text
                           style={[
-                            localStyles.scheduleNumber,
+                            localStyles.dutySmallText,
                             {
-                              backgroundColor: isDarkTheme
-                                ? "#263449"
-                                : "#E0E7FF",
+                              color: colors.textSecondary,
                             },
                           ]}
                         >
-                          <Text
-                            style={{
-                              fontSize: 13,
-                              fontWeight: "900",
-                              color: isDarkTheme ? "#FACC15" : "#1E3A8A",
-                            }}
-                          >
-                            {index + 1}
-                          </Text>
-                        </View>
+                          SELECTED DUTY
+                        </Text>
 
-                        <View style={{ flex: 1, marginLeft: 10 }}>
-                          <Text
-                            style={[
-                              localStyles.scheduleDuty,
-                              {
-                                color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                              },
-                            ]}
-                          >
-                            {item.duty_type || "Assigned Duty"}
-                          </Text>
-
-                          <View style={localStyles.scheduleSectorRow}>
-                            <Ionicons
-                              name="location-outline"
-                              size={14}
-                              color={colors.textSecondary}
-                            />
-
-                            <Text
-                              numberOfLines={1}
-                              style={[
-                                localStyles.scheduleSector,
-                                {
-                                  color: colors.textSecondary,
-                                },
-                              ]}
-                            >
-                              {item.sector || "No sector specified"}
-                            </Text>
-                          </View>
-                        </View>
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            localStyles.dutyValue,
+                            {
+                              color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                            },
+                          ]}
+                        >
+                          {selectedDutyType}
+                        </Text>
                       </View>
+                    </View>
 
-                      {/* Date / Time */}
+                    <Ionicons
+                      name={showDropdown ? "chevron-up" : "chevron-down"}
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
 
-                      <View
-                        style={[
-                          localStyles.scheduleInfoGrid,
-                          {
-                            borderTopColor: isDarkTheme ? "#334155" : "#E2E8F0",
-                            borderBottomColor: isDarkTheme
-                              ? "#334155"
-                              : "#E2E8F0",
-                          },
-                        ]}
+                  {/* DROPDOWN */}
+
+                  {showDropdown && !isShiftActive && (
+                    <View
+                      style={[
+                        localStyles.dropdownMenu,
+                        {
+                          backgroundColor: isDarkTheme ? "#172235" : "#FFFFFF",
+                          borderColor: isDarkTheme ? "#334155" : "#CBD5E1",
+                        },
+                      ]}
+                    >
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        scrollEnabled={true}
+                        showsVerticalScrollIndicator={true}
+                        keyboardShouldPersistTaps="handled"
+                        bounces={false}
+                        style={localStyles.dropdownScroll}
+                        contentContainerStyle={
+                          localStyles.dropdownScrollContent
+                        }
                       >
-                        <View style={localStyles.scheduleInfo}>
-                          <Ionicons
-                            name="calendar-outline"
-                            size={17}
-                            color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                          />
+                        {DUTY_TYPES.map((dutyType) => {
+                          const selected = selectedDutyType === dutyType;
 
-                          <View style={{ marginLeft: 8 }}>
-                            <Text
-                              style={[
-                                localStyles.scheduleInfoLabel,
-                                {
-                                  color: colors.textSecondary,
-                                },
-                              ]}
-                            >
-                              DATE
-                            </Text>
-
-                            <Text
-                              style={[
-                                localStyles.scheduleInfoValue,
-                                {
-                                  color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                                },
-                              ]}
-                            >
-                              {getScheduleDate(item)}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={localStyles.scheduleInfo}>
-                          <Ionicons
-                            name="time-outline"
-                            size={17}
-                            color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                          />
-
-                          <View style={{ marginLeft: 8 }}>
-                            <Text
-                              style={[
-                                localStyles.scheduleInfoLabel,
-                                {
-                                  color: colors.textSecondary,
-                                },
-                              ]}
-                            >
-                              DUTY HOURS
-                            </Text>
-
-                            <Text
-                              style={[
-                                localStyles.scheduleInfoValue,
-                                {
-                                  color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                                },
-                              ]}
-                            >
-                              {item.timeFrom || "--"} – {item.timeTo || "--"}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      {/* Personnel */}
-
-                      <View style={{ marginTop: 14 }}>
-                        <View style={localStyles.assignedHeader}>
-                          <Ionicons
-                            name="people-outline"
-                            size={17}
-                            color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                          />
-
-                          <Text
-                            style={[
-                              localStyles.assignedHeaderText,
-                              {
-                                color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                              },
-                            ]}
-                          >
-                            ASSIGNED PERSONNEL
-                          </Text>
-
-                          <View
-                            style={[
-                              localStyles.personnelCount,
-                              {
-                                backgroundColor: isDarkTheme
-                                  ? "#263449"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={{
-                                fontSize: 16,
-                                fontWeight: "900",
-                                color: colors.textSecondary,
+                          return (
+                            <TouchableOpacity
+                              key={dutyType}
+                              onPress={() => {
+                                setSelectedDutyType(dutyType);
+                                setActiveDutyType(dutyType);
+                                setShowDropdown(false);
                               }}
+                              activeOpacity={0.75}
+                              style={[
+                                localStyles.dropdownItem,
+                                {
+                                  backgroundColor: selected
+                                    ? isDarkTheme
+                                      ? "#263449"
+                                      : "#EFF6FF"
+                                    : "transparent",
+                                },
+                              ]}
                             >
-                              {item.personnel?.length || 0}
-                            </Text>
-                          </View>
-                        </View>
-
-                        {item.personnel && item.personnel.length > 0 ? (
-                          <View style={{ marginTop: 9 }}>
-                            {item.personnel.map((pItem, pIndex) => (
-                              <View
-                                key={pIndex}
+                              <Text
                                 style={[
-                                  localStyles.personnelRow,
+                                  localStyles.dropdownItemText,
                                   {
-                                    backgroundColor: isDarkTheme
-                                      ? "#0F172A"
-                                      : "#FFFFFF",
-                                    borderColor: isDarkTheme
-                                      ? "#334155"
-                                      : "#E2E8F0",
+                                    color: selected
+                                      ? isDarkTheme
+                                        ? "#FACC15"
+                                        : "#1E3A8A"
+                                      : isDarkTheme
+                                        ? "#E2E8F0"
+                                        : "#334155",
                                   },
                                 ]}
                               >
-                                <View
-                                  style={[
-                                    localStyles.personnelAvatar,
-                                    {
-                                      backgroundColor: isDarkTheme
-                                        ? "#263449"
-                                        : "#EFF6FF",
-                                    },
-                                  ]}
-                                >
-                                  <Ionicons
-                                    name="person-outline"
-                                    size={19}
-                                    color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
-                                  />
-                                </View>
+                                {dutyType}
+                              </Text>
 
-                                <View
-                                  style={{
-                                    flex: 1,
-                                    marginLeft: 10,
-                                  }}
-                                >
-                                  <Text
-                                    numberOfLines={2}
-                                    style={[
-                                      localStyles.personnelName,
-                                      {
-                                        color: isDarkTheme
-                                          ? "#F8FAFC"
-                                          : "#0F172A",
-                                      },
-                                    ]}
-                                  >
-                                    {pItem.rank_name || ""}{" "}
-                                    {pItem.fullname || "Unknown"}
-                                  </Text>
-
-                                  <View style={localStyles.personnelActions}>
-                                    <TouchableOpacity
-                                      onPress={() =>
-                                        handlePhoneCall(pItem.phone_number)
-                                      }
-                                      disabled={!pItem.phone_number}
-                                      activeOpacity={0.75}
-                                      style={[
-                                        localStyles.smallContactButton,
-                                        {
-                                          backgroundColor: isDarkTheme
-                                            ? "#172235"
-                                            : "#F1F5F9",
-                                          opacity: pItem.phone_number
-                                            ? 1
-                                            : 0.45,
-                                        },
-                                      ]}
-                                    >
-                                      <Ionicons
-                                        name="call-outline"
-                                        size={15}
-                                        color="#22C55E"
-                                      />
-
-                                      <Text
-                                        numberOfLines={1}
-                                        style={[
-                                          localStyles.smallContactText,
-                                          {
-                                            color: colors.textSecondary,
-                                          },
-                                        ]}
-                                      >
-                                        {pItem.phone_number || "No phone"}
-                                      </Text>
-                                    </TouchableOpacity>
-
-                                    <TouchableOpacity
-                                      onPress={() =>
-                                        handleViberCall(pItem.viber_number)
-                                      }
-                                      disabled={!pItem.viber_number}
-                                      activeOpacity={0.75}
-                                      style={[
-                                        localStyles.smallContactButton,
-                                        {
-                                          backgroundColor: isDarkTheme
-                                            ? "#172235"
-                                            : "#F1F5F9",
-                                          opacity: pItem.viber_number
-                                            ? 1
-                                            : 0.45,
-                                        },
-                                      ]}
-                                    >
-                                      <FontAwesome
-                                        name="viber"
-                                        size={15}
-                                        color="#7360F2"
-                                      />
-
-                                      <Text
-                                        numberOfLines={1}
-                                        style={[
-                                          localStyles.smallContactText,
-                                          {
-                                            color: colors.textSecondary,
-                                          },
-                                        ]}
-                                      >
-                                        {pItem.viber_number || "No Viber"}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  </View>
-                                </View>
-                              </View>
-                            ))}
-                          </View>
-                        ) : (
-                          <View
-                            style={[
-                              localStyles.emptyPersonnel,
-                              {
-                                backgroundColor: isDarkTheme
-                                  ? "#0F172A"
-                                  : "#F8FAFC",
-                              },
-                            ]}
-                          >
-                            <Ionicons
-                              name="people-outline"
-                              size={22}
-                              color={colors.textSecondary}
-                            />
-
-                            <Text
-                              style={{
-                                marginTop: 6,
-                                fontSize: 13,
-                                color: colors.textSecondary,
-                              }}
-                            >
-                              No personnel assigned
-                            </Text>
-                          </View>
-                        )}
-                      </View>
+                              {selected && (
+                                <Ionicons
+                                  name="checkmark"
+                                  size={18}
+                                  color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                                />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
                     </View>
-                  ))}
-                </View>
-              ) : (
-                <View
-                  style={[
-                    localStyles.emptySchedule,
-                    {
-                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      localStyles.emptyScheduleIcon,
-                      {
-                        backgroundColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name="calendar-clear-outline"
-                      size={30}
-                      color={colors.textSecondary}
-                    />
-                  </View>
-
-                  <Text
-                    style={[
-                      localStyles.emptyScheduleTitle,
-                      {
-                        color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                      },
-                    ]}
-                  >
-                    No Active Schedule
-                  </Text>
-
-                  <Text
-                    style={[
-                      localStyles.emptyScheduleText,
-                      {
-                        color: colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    No patrol duty has been assigned to you at this time.
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* ================================================================ */}
-        {/* SOS SCREEN                                                        */}
-        {/* ================================================================ */}
-
-        {activeNav === "sos" && (
-          <View style={localStyles.sosContainer}>
-            <View
-              style={[
-                localStyles.sosCard,
-                {
-                  backgroundColor: isDarkTheme ? "#241014" : "#FFFFFF",
-                  borderColor: "#EF4444",
-                },
-              ]}
-            >
-              <View style={localStyles.sosHeader}>
-                <View
-                  style={[
-                    localStyles.sosIconCircle,
-                    {
-                      backgroundColor: "rgba(239,68,68,0.14)",
-                    },
-                  ]}
-                >
-                  <Ionicons name="alert-circle" size={48} color="#EF4444" />
+                  )}
                 </View>
 
-                <Text
-                  style={[
-                    localStyles.sosTitle,
-                    {
-                      color: "#EF4444",
-                    },
-                  ]}
-                >
-                  EMERGENCY SOS
-                </Text>
+                {/* ---------------------------------------------------------- */}
+                {/* START / STOP PATROL                                         */}
+                {/* ---------------------------------------------------------- */}
 
-                <Text
+                <TouchableOpacity
                   style={[
-                    localStyles.sosSubtitle,
+                    localStyles.patrolButton,
                     {
-                      color: colors.textSecondary,
+                      backgroundColor: isShiftActive ? "#DC2626" : "#16A34A",
+                      opacity: isPatrolStarting ? 0.7 : 1,
                     },
                   ]}
+                  disabled={isPatrolStarting}
+                  activeOpacity={0.85}
+                  onPress={confirmPatrolToggle}
                 >
-                  Emergency communication interface
-                </Text>
+                  {isPatrolStarting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <View style={localStyles.patrolButtonIcon}>
+                        <Ionicons
+                          name={
+                            isShiftActive
+                              ? "stop-circle-outline"
+                              : "play-circle-outline"
+                          }
+                          size={32}
+                          color="#FFFFFF"
+                        />
+                      </View>
+
+                      <View>
+                        <Text style={localStyles.patrolButtonTitle}>
+                          {isShiftActive ? "STOP PATROL" : "START PATROL"}
+                        </Text>
+
+                        <Text style={localStyles.patrolButtonSubtitle}>
+                          {isShiftActive
+                            ? "End current tracking session"
+                            : `Begin ${selectedDutyType}`}
+                        </Text>
+                      </View>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
+
+              {/* ============================================================ */}
+              {/* SYNC CARD                                                     */}
+              {/* ============================================================ */}
 
               <View
                 style={[
-                  localStyles.sosWarning,
+                  localStyles.syncCard,
                   {
-                    backgroundColor: isDarkTheme ? "#30151A" : "#FEF2F2",
-                    borderColor: "#FCA5A5",
-                  },
-                ]}
-              >
-                <Ionicons name="warning-outline" size={21} color="#EF4444" />
-
-                <Text
-                  style={[
-                    localStyles.sosWarningText,
-                    {
-                      color: isDarkTheme ? "#FECACA" : "#991B1B",
-                    },
-                  ]}
-                >
-                  Your emergency signal has been sent with your current location
-                  coordinates. Remain in a safe location unless movement is
-                  necessary.
-                </Text>
-              </View>
-
-              <View style={localStyles.sosStatus}>
-                <View
-                  style={[
-                    localStyles.sosStatusIcon,
-                    {
-                      backgroundColor: "#DCFCE7",
-                    },
-                  ]}
-                >
-                  <Ionicons name="checkmark" size={22} color="#16A34A" />
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      localStyles.sosStatusTitle,
-                      {
-                        color: isDarkTheme ? "#F8FAFC" : "#0F172A",
-                      },
-                    ]}
-                  >
-                    EMERGENCY CONTACTS NOTIFIED
-                  </Text>
-
-                  <Text
-                    style={[
-                      localStyles.sosStatusText,
-                      {
-                        color: colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    Your emergency notification has been processed.
-                  </Text>
-                </View>
-              </View>
-
-              <View
-                style={[
-                  localStyles.sosContacts,
-                  {
-                    backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                    backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
                     borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
                   },
                 ]}
               >
-                {[
-                  "INPPO Operations Center",
-                  "Designated Emergency Contact",
-                  "Unit Commander",
-                ].map((contact) => (
-                  <View key={contact} style={localStyles.sosContactRow}>
+                <View style={localStyles.sectionHeader}>
+                  <View
+                    style={[
+                      localStyles.sectionIcon,
+                      {
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      },
+                    ]}
+                  >
                     <Ionicons
-                      name="checkmark-circle"
-                      size={18}
-                      color="#22C55E"
+                      name="cloud-upload-outline"
+                      size={22}
+                      color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sectionTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      Data Synchronization
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sectionSubtitle,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Patrol records waiting to upload
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.syncStatus,
+                    {
+                      backgroundColor:
+                        unsyncedCount > 0
+                          ? isDarkTheme
+                            ? "#291D0A"
+                            : "#FFFBEB"
+                          : isDarkTheme
+                            ? "#10251B"
+                            : "#F0FDF4",
+                      borderColor: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
+                    },
+                  ]}
+                >
+                  <View>
+                    <Text
+                      style={[
+                        localStyles.syncCount,
+                        {
+                          color: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
+                        },
+                      ]}
+                    >
+                      {unsyncedCount}
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.syncCountLabel,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {unsyncedCount === 1 ? "pending log" : "pending logs"}
+                    </Text>
+                  </View>
+
+                  <View style={localStyles.syncStatusRight}>
+                    <Ionicons
+                      name={
+                        unsyncedCount > 0
+                          ? "cloud-upload-outline"
+                          : "cloud-done-outline"
+                      }
+                      size={25}
+                      color={unsyncedCount > 0 ? "#F59E0B" : "#22C55E"}
                     />
 
                     <Text
                       style={[
-                        localStyles.sosContactText,
+                        localStyles.syncStatusText,
                         {
-                          color: isDarkTheme ? "#CBD5E1" : "#475569",
+                          color: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
                         },
                       ]}
                     >
-                      {contact}
+                      {unsyncedCount > 0 ? "WAITING TO SYNC" : "ALL SYNCED"}
                     </Text>
                   </View>
-                ))}
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    localStyles.syncButton,
+                    {
+                      backgroundColor:
+                        unsyncedCount > 0
+                          ? isDarkTheme
+                            ? "#FACC15"
+                            : "#1E3A8A"
+                          : isDarkTheme
+                            ? "#1E293B"
+                            : "#F1F5F9",
+                      borderColor: isDarkTheme ? "#334155" : "#E2E8F0",
+                      opacity: isSyncing || unsyncedCount === 0 ? 0.65 : 1,
+                    },
+                  ]}
+                  onPress={onSync}
+                  disabled={isSyncing || unsyncedCount === 0}
+                  activeOpacity={0.8}
+                >
+                  {isSyncing ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={isDarkTheme ? "#0B121F" : "#FFFFFF"}
+                    />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="sync-outline"
+                        size={20}
+                        color={
+                          unsyncedCount > 0
+                            ? isDarkTheme
+                              ? "#0B121F"
+                              : "#FFFFFF"
+                            : colors.textSecondary
+                        }
+                      />
+
+                      <Text
+                        style={[
+                          localStyles.syncButtonText,
+                          {
+                            color:
+                              unsyncedCount > 0
+                                ? isDarkTheme
+                                  ? "#0B121F"
+                                  : "#FFFFFF"
+                                : colors.textSecondary,
+                          },
+                        ]}
+                      >
+                        {unsyncedCount > 0
+                          ? "SYNC PATROL LOGS"
+                          : "NOTHING TO SYNC"}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
-                style={localStyles.returnButton}
-                activeOpacity={0.85}
-                onPress={() => setActiveNav("home")}
-              >
-                <Ionicons name="arrow-back-outline" size={20} color="#FFFFFF" />
+              {/* ============================================================ */}
+              {/* PATROL SCHEDULE                                               */}
+              {/* ============================================================ */}
 
-                <Text style={localStyles.returnButtonText}>
-                  RETURN TO DASHBOARD
-                </Text>
-              </TouchableOpacity>
+              <View
+                style={[
+                  localStyles.scheduleCard,
+                  {
+                    backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
+                    borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                  },
+                ]}
+              >
+                <View style={localStyles.sectionHeader}>
+                  <View
+                    style={[
+                      localStyles.sectionIcon,
+                      {
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={22}
+                      color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sectionTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      Patrol Schedule
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sectionSubtitle,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Your assigned duties and personnel
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      localStyles.scheduleCount,
+                      {
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 18,
+                        fontWeight: "900",
+                        color: isDarkTheme ? "#FACC15" : "#1E3A8A",
+                      }}
+                    >
+                      {schedule?.length || 0}
+                    </Text>
+                  </View>
+                </View>
+
+                {schedule && schedule.length > 0 ? (
+                  <View style={{ marginTop: 4 }}>
+                    {schedule.map((item, index) => (
+                      <View
+                        key={item.id || index}
+                        style={[
+                          localStyles.scheduleItem,
+                          {
+                            backgroundColor: isDarkTheme
+                              ? "#172235"
+                              : "#F8FAFC",
+                            borderColor: isDarkTheme ? "#334155" : "#E2E8F0",
+                          },
+                        ]}
+                      >
+                        {/* Schedule Header */}
+
+                        <View style={localStyles.scheduleItemHeader}>
+                          <View
+                            style={[
+                              localStyles.scheduleNumber,
+                              {
+                                backgroundColor: isDarkTheme
+                                  ? "#263449"
+                                  : "#E0E7FF",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "900",
+                                color: isDarkTheme ? "#FACC15" : "#1E3A8A",
+                              }}
+                            >
+                              {index + 1}
+                            </Text>
+                          </View>
+
+                          <View style={{ flex: 1, marginLeft: 10 }}>
+                            <Text
+                              style={[
+                                localStyles.scheduleDuty,
+                                {
+                                  color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                },
+                              ]}
+                            >
+                              {item.duty_type || "Assigned Duty"}
+                            </Text>
+
+                            <View style={localStyles.scheduleSectorRow}>
+                              <Ionicons
+                                name="location-outline"
+                                size={14}
+                                color={colors.textSecondary}
+                              />
+
+                              <Text
+                                numberOfLines={2}
+                                style={[
+                                  localStyles.scheduleSector,
+                                  {
+                                    color: colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                {item.sector ? (
+                                  <>
+                                    {item.sector.deployment
+                                      ? `${item.sector.deployment} - `
+                                      : ""}
+                                    {item.sector.sector
+                                      ? `Sector ${item.sector.sector}`
+                                      : "Sector"}
+
+                                    {item.sector.sector_details?.length
+                                      ? ` • ${item.sector.sector_details
+                                          .map(
+                                            (detail) => detail.barangay?.name,
+                                          )
+                                          .filter(Boolean)
+                                          .join(", ")}`
+                                      : ""}
+                                  </>
+                                ) : (
+                                  "No sector specified"
+                                )}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Date / Time */}
+
+                        <View
+                          style={[
+                            localStyles.scheduleInfoGrid,
+                            {
+                              borderTopColor: isDarkTheme
+                                ? "#334155"
+                                : "#E2E8F0",
+                              borderBottomColor: isDarkTheme
+                                ? "#334155"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <View style={localStyles.scheduleInfo}>
+                            <Ionicons
+                              name="calendar-outline"
+                              size={17}
+                              color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                            />
+
+                            <View style={{ marginLeft: 8 }}>
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoLabel,
+                                  {
+                                    color: colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                DATE
+                              </Text>
+
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoValue,
+                                  {
+                                    color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                  },
+                                ]}
+                              >
+                                {getScheduleDate(item)}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={localStyles.scheduleInfo}>
+                            <Ionicons
+                              name="time-outline"
+                              size={17}
+                              color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                            />
+
+                            <View style={{ marginLeft: 8 }}>
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoLabel,
+                                  {
+                                    color: colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                DUTY HOURS
+                              </Text>
+
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoValue,
+                                  {
+                                    color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                  },
+                                ]}
+                              >
+                                {item.timeFrom.slice(0, 5) || "--"} –{" "}
+                                {item.timeTo.slice(0, 5) || "--"}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Personnel */}
+
+                        <View style={{ marginTop: 14 }}>
+                          <View style={localStyles.assignedHeader}>
+                            <Ionicons
+                              name="people-outline"
+                              size={17}
+                              color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                            />
+
+                            <Text
+                              style={[
+                                localStyles.assignedHeaderText,
+                                {
+                                  color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                },
+                              ]}
+                            >
+                              ASSIGNED PERSONNEL
+                            </Text>
+
+                            <View
+                              style={[
+                                localStyles.personnelCount,
+                                {
+                                  backgroundColor: isDarkTheme
+                                    ? "#263449"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 18,
+                                  fontWeight: "900",
+                                  color: colors.textSecondary,
+                                }}
+                              >
+                                {item.personnel?.length || 0}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {item.personnel && item.personnel.length > 0 ? (
+                            <View style={{ marginTop: 9 }}>
+                              {item.personnel.map((pItem, pIndex) => (
+                                <View
+                                  key={pIndex}
+                                  style={[
+                                    localStyles.personnelRow,
+                                    {
+                                      backgroundColor: isDarkTheme
+                                        ? "#0F172A"
+                                        : "#FFFFFF",
+                                      borderColor: isDarkTheme
+                                        ? "#334155"
+                                        : "#E2E8F0",
+                                    },
+                                  ]}
+                                >
+                                  <View
+                                    style={[
+                                      localStyles.personnelAvatar,
+                                      {
+                                        backgroundColor: isDarkTheme
+                                          ? "#263449"
+                                          : "#EFF6FF",
+                                      },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name="person-outline"
+                                      size={19}
+                                      color={
+                                        isDarkTheme ? "#FACC15" : "#1E3A8A"
+                                      }
+                                    />
+                                  </View>
+
+                                  <View
+                                    style={{
+                                      flex: 1,
+                                      marginLeft: 10,
+                                    }}
+                                  >
+                                    <Text
+                                      numberOfLines={2}
+                                      style={[
+                                        localStyles.personnelName,
+                                        {
+                                          color: isDarkTheme
+                                            ? "#F8FAFC"
+                                            : "#0F172A",
+                                        },
+                                      ]}
+                                    >
+                                      {pItem.rank_name || ""}{" "}
+                                      {pItem.fullname || "Unknown"}
+                                    </Text>
+
+                                    <View style={localStyles.personnelActions}>
+                                      <TouchableOpacity
+                                        onPress={() =>
+                                          handlePhoneCall(pItem.phone_number)
+                                        }
+                                        disabled={!pItem.phone_number}
+                                        activeOpacity={0.75}
+                                        style={[
+                                          localStyles.smallContactButton,
+                                          {
+                                            backgroundColor: isDarkTheme
+                                              ? "#172235"
+                                              : "#F1F5F9",
+                                            opacity: pItem.phone_number
+                                              ? 1
+                                              : 0.45,
+                                          },
+                                        ]}
+                                      >
+                                        <Ionicons
+                                          name="call-outline"
+                                          size={15}
+                                          color="#22C55E"
+                                        />
+
+                                        <Text
+                                          numberOfLines={1}
+                                          style={[
+                                            localStyles.smallContactText,
+                                            {
+                                              color: colors.textSecondary,
+                                            },
+                                          ]}
+                                        >
+                                          {pItem.phone_number || "No phone"}
+                                        </Text>
+                                      </TouchableOpacity>
+
+                                      <TouchableOpacity
+                                        onPress={() =>
+                                          handleViberCall(pItem.viber_number)
+                                        }
+                                        disabled={!pItem.viber_number}
+                                        activeOpacity={0.75}
+                                        style={[
+                                          localStyles.smallContactButton,
+                                          {
+                                            backgroundColor: isDarkTheme
+                                              ? "#172235"
+                                              : "#F1F5F9",
+                                            opacity: pItem.viber_number
+                                              ? 1
+                                              : 0.45,
+                                          },
+                                        ]}
+                                      >
+                                        <FontAwesome
+                                          name="viber"
+                                          size={15}
+                                          color="#7360F2"
+                                        />
+
+                                        <Text
+                                          numberOfLines={1}
+                                          style={[
+                                            localStyles.smallContactText,
+                                            {
+                                              color: colors.textSecondary,
+                                            },
+                                          ]}
+                                        >
+                                          {pItem.viber_number || "No Viber"}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  </View>
+                                </View>
+                              ))}
+                            </View>
+                          ) : (
+                            <View
+                              style={[
+                                localStyles.emptyPersonnel,
+                                {
+                                  backgroundColor: isDarkTheme
+                                    ? "#0F172A"
+                                    : "#F8FAFC",
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="people-outline"
+                                size={22}
+                                color={colors.textSecondary}
+                              />
+
+                              <Text
+                                style={{
+                                  marginTop: 6,
+                                  fontSize: 13,
+                                  color: colors.textSecondary,
+                                }}
+                              >
+                                No personnel assigned
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      localStyles.emptySchedule,
+                      {
+                        backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        localStyles.emptyScheduleIcon,
+                        {
+                          backgroundColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="calendar-clear-outline"
+                        size={30}
+                        color={colors.textSecondary}
+                      />
+                    </View>
+
+                    <Text
+                      style={[
+                        localStyles.emptyScheduleTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      No Active Schedule
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.emptyScheduleText,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      No patrol duty has been assigned to you at this time.
+                    </Text>
+                  </View>
+                )}
+              </View>
             </View>
-          </View>
-        )}
-        {activeNav === "account" && personnel && (
-          <AccountScreen
-            isDarkTheme={isDarkTheme}
-            personnelId={personnel?.id}
-            onClose={() => setActiveNav("home")}
-          />
-        )}
-      </ScrollView>
+          )}
+
+          {/* ================================================================ */}
+          {/* SOS SCREEN                                                        */}
+          {/* ================================================================ */}
+
+          {activeNav === "sos" && (
+            <View style={localStyles.sosContainer}>
+              <View
+                style={[
+                  localStyles.sosCard,
+                  {
+                    backgroundColor: isDarkTheme ? "#241014" : "#FFFFFF",
+                    borderColor: "#EF4444",
+                  },
+                ]}
+              >
+                <View style={localStyles.sosHeader}>
+                  <View
+                    style={[
+                      localStyles.sosIconCircle,
+                      {
+                        backgroundColor: "rgba(239,68,68,0.14)",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="alert-circle" size={48} color="#EF4444" />
+                  </View>
+
+                  <Text
+                    style={[
+                      localStyles.sosTitle,
+                      {
+                        color: "#EF4444",
+                      },
+                    ]}
+                  >
+                    DISTRESS SIGNAL SENT
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.sosWarning,
+                    {
+                      backgroundColor: isDarkTheme ? "#30151A" : "#FEF2F2",
+                      borderColor: "#FCA5A5",
+                    },
+                  ]}
+                >
+                  <Ionicons name="warning-outline" size={21} color="#EF4444" />
+
+                  <Text
+                    style={[
+                      localStyles.sosWarningText,
+                      {
+                        color: isDarkTheme ? "#FECACA" : "#991B1B",
+                      },
+                    ]}
+                  >
+                    Your emergency signal has been sent with your current
+                    location coordinates. Remain in a safe location unless
+                    movement is necessary.
+                  </Text>
+                </View>
+
+                <View style={localStyles.sosStatus}>
+                  <View
+                    style={[
+                      localStyles.sosStatusIcon,
+                      {
+                        backgroundColor: "#DCFCE7",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="checkmark" size={22} color="#16A34A" />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sosStatusTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      EMERGENCY CONTACTS NOTIFIED
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sosStatusText,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Your emergency notification has been processed.
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.sosContacts,
+                    {
+                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                      borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  {[
+                    "INPPO Operations Center",
+                    "Designated Emergency Contact",
+                    "Unit Commander",
+                  ].map((contact) => (
+                    <View key={contact} style={localStyles.sosContactRow}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color="#22C55E"
+                      />
+
+                      <Text
+                        style={[
+                          localStyles.sosContactText,
+                          {
+                            color: isDarkTheme ? "#CBD5E1" : "#475569",
+                          },
+                        ]}
+                      >
+                        {contact}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={localStyles.returnButton}
+                  activeOpacity={0.85}
+                  onPress={() => setActiveNav("home")}
+                >
+                  <Ionicons
+                    name="arrow-back-outline"
+                    size={20}
+                    color="#FFFFFF"
+                  />
+
+                  <Text style={localStyles.returnButtonText}>
+                    RETURN TO DASHBOARD
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {activeNav === "account" && personnel && (
+            <AccountScreen
+              isDarkTheme={isDarkTheme}
+              personnelId={personnel?.id}
+              onClose={() => setActiveNav("home")}
+            />
+          )}
+
+          {activeNav === "patrol_summary" && (
+            <PatrolSummaryScreen
+              isDarkTheme={isDarkTheme}
+              personnelId={personnel?.id ?? ""}
+              unitId={personnel?.unitId ?? ""}
+              personnelName={personnel?.fullname ?? ""}
+              personnelRank={personnel?.rank?.rank_name ?? ""}
+            />
+          )}
+        </ScrollView>
+      )}
       {/* ================================================================ */}
       {/* BOTTOM NAVIGATION                                                 */}
       {/* ================================================================ */}
@@ -1484,19 +1592,69 @@ export const DashboardView = ({
           </View>
 
           <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "home" ? "700" : "500",
+              color:
+                activeNav === "home"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Home
+          </Text>
+        </TouchableOpacity>
+
+        {/* RECENT LOGS */}
+
+        <TouchableOpacity
+          onPress={() => setActiveNav("recent_logs")}
+          activeOpacity={0.8}
+          style={localStyles.navItem}
+        >
+          <View
             style={[
-              localStyles.navLabel,
+              localStyles.navIconContainer,
               {
-                color:
-                  activeNav === "home"
+                backgroundColor:
+                  activeNav === "recent_logs"
                     ? isDarkTheme
-                      ? "#FACC15"
-                      : "#1E3A8A"
-                    : colors.textSecondary,
+                      ? "#263449"
+                      : "#EFF6FF"
+                    : "transparent",
               },
             ]}
           >
-            Home
+            <Ionicons
+              name={activeNav === "recent_logs" ? "time" : "time-outline"}
+              size={24}
+              color={
+                activeNav === "recent_logs"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary
+              }
+            />
+          </View>
+
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "recent_logs" ? "700" : "500",
+              color:
+                activeNav === "recent_logs"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Recent Logs
           </Text>
         </TouchableOpacity>
 
@@ -1504,17 +1662,71 @@ export const DashboardView = ({
 
         <TouchableOpacity
           onPress={() => {
-            setActiveNav("sos");
-            onEmergencySOS();
+            onEmergencySOS().then((success) => {
+              if (success) {
+                setActiveNav("sos");
+              }
+            });
           }}
           activeOpacity={0.85}
           style={localStyles.sosNavWrapper}
         >
           <View style={localStyles.sosNavButton}>
-            <Ionicons name="alert-circle" size={42} color="#FFFFFF" />
+            <Ionicons name="alert-circle" size={50} color="#FFFFFF" />
           </View>
+        </TouchableOpacity>
 
-          <Text style={localStyles.sosNavLabel}>SOS</Text>
+        {/* ACCOUNT */}
+
+        <TouchableOpacity
+          onPress={() => setActiveNav("patrol_summary")}
+          activeOpacity={0.8}
+          style={localStyles.navItem}
+        >
+          <View
+            style={[
+              localStyles.navIconContainer,
+              {
+                backgroundColor:
+                  activeNav === "patrol_summary"
+                    ? isDarkTheme
+                      ? "#263449"
+                      : "#EFF6FF"
+                    : "transparent",
+              },
+            ]}
+          >
+            <Ionicons
+              name={
+                activeNav === "patrol_summary"
+                  ? "document-text"
+                  : "document-text-outline"
+              }
+              size={24}
+              color={
+                activeNav === "patrol_summary"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary
+              }
+            />
+          </View>
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "patrol_summary" ? "700" : "500",
+              color:
+                activeNav === "patrol_summary"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Patrol Summary
+          </Text>
         </TouchableOpacity>
 
         {/* ACCOUNT */}
@@ -1559,19 +1771,18 @@ export const DashboardView = ({
               }
             />
           </View>
-
           <Text
-            style={[
-              localStyles.navLabel,
-              {
-                color:
-                  activeNav === "account"
-                    ? isDarkTheme
-                      ? "#FACC15"
-                      : "#1E3A8A"
-                    : colors.textSecondary,
-              },
-            ]}
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "account" ? "700" : "500",
+              color:
+                activeNav === "account"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
           >
             Account
           </Text>
@@ -1588,6 +1799,11 @@ export const DashboardView = ({
 const localStyles = StyleSheet.create({
   root: {
     flex: 1,
+  },
+
+  recentLogsContainer: {
+    flex: 1,
+    width: "100%",
   },
 
   scrollContent: {
@@ -1928,7 +2144,7 @@ const localStyles = StyleSheet.create({
 
     // Reduced from 16 to improve spacing
     // between duty selector and button.
-    marginTop: 12,
+    marginTop: 16,
 
     paddingHorizontal: 18,
 
@@ -1943,14 +2159,14 @@ const localStyles = StyleSheet.create({
 
   patrolButtonTitle: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: 20,
     fontWeight: "900",
     letterSpacing: 0.6,
   },
 
   patrolButtonSubtitle: {
     color: "rgba(255,255,255,0.78)",
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "600",
     marginTop: 2,
   },
@@ -1978,7 +2194,7 @@ const localStyles = StyleSheet.create({
   },
 
   syncCountLabel: {
-    fontSize: 10,
+    fontSize: 16,
     fontWeight: "600",
     marginTop: 1,
   },
@@ -1988,7 +2204,7 @@ const localStyles = StyleSheet.create({
   },
 
   syncStatusText: {
-    fontSize: 13,
+    fontSize: 17,
     fontWeight: "900",
     letterSpacing: 0.6,
     marginTop: 4,
@@ -2092,7 +2308,7 @@ const localStyles = StyleSheet.create({
   },
 
   assignedHeaderText: {
-    fontSize: 10,
+    fontSize: 14,
     fontWeight: "900",
     letterSpacing: 0.7,
     marginLeft: 6,
@@ -2126,7 +2342,7 @@ const localStyles = StyleSheet.create({
   },
 
   personnelName: {
-    fontSize: 13,
+    fontSize: 17,
     fontWeight: "800",
   },
 
@@ -2146,7 +2362,7 @@ const localStyles = StyleSheet.create({
   },
 
   smallContactText: {
-    fontSize: 9,
+    fontSize: 17,
     fontWeight: "600",
     marginLeft: 5,
     flexShrink: 1,
@@ -2322,10 +2538,10 @@ const localStyles = StyleSheet.create({
     borderTopWidth: 1,
 
     flexDirection: "row",
-    justifyContent: "space-around",
+    justifyContent: "space-between",
     alignItems: "center",
 
-    paddingHorizontal: 28,
+    paddingHorizontal: 4,
 
     elevation: 20,
 
@@ -2341,15 +2557,15 @@ const localStyles = StyleSheet.create({
   },
 
   navItem: {
-    width: 80,
-    height: 62,
+    flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
 
   navIconContainer: {
-    width: 42,
-    height: 34,
+    width: 48,
+    height: 36,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -2362,16 +2578,16 @@ const localStyles = StyleSheet.create({
   },
 
   sosNavWrapper: {
-    width: 90,
-    height: 90,
+    flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "flex-start",
-    marginTop: -35,
+    marginTop: -30,
   },
 
   sosNavButton: {
-    width: 68,
-    height: 68,
+    width: 70,
+    height: 70,
     borderRadius: 34,
     backgroundColor: "#EF4444",
     justifyContent: "center",

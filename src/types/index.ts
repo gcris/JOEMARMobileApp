@@ -44,12 +44,47 @@ export interface PersonnelLog {
   isSynced: boolean;
 }
 
+export type Sector = {
+  id: string;
+  deployment: string | null;
+  sector: number | null;
+  unit_id: string | null;
+
+  unit?: Unit;
+
+  sector_details?: SectorDetail[];
+};
+
+export type SectorDetail = {
+  id: string;
+  brgy_id: number | null;
+  sector_id: string | null;
+
+  barangay?: Barangay;
+};
+
+export type Barangay = {
+  id: number;
+  city_mun_id: number;
+  name: string;
+
+  city_mun?: CityMunicipality;
+};
+
+export type CityMunicipality = {
+  id: number;
+  name: string;
+  district: number;
+  province: string;
+};
+
 export interface Schedule {
   id: string;
   date: string;
   timeFrom: string;
   timeTo: string;
-  sector: string;
+  sector_id: string | null;
+  sector?: Sector;
   duty_type: string;
   unitId: string;
   personnelId: string;

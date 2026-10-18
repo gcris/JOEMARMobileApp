@@ -340,7 +340,7 @@ export const AccountScreen = ({
       <View style={{ marginBottom: 18 }}>
         <Text
           style={{
-            fontSize: 13,
+            fontSize: 16,
             fontWeight: "700",
             color: theme.secondary,
             marginBottom: 7,
@@ -382,7 +382,7 @@ export const AccountScreen = ({
             style={{
               flex: 1,
               color: editable ? theme.text : theme.secondary,
-              fontSize: 16,
+              fontSize: 20,
               paddingVertical: 0,
             }}
           />
@@ -408,7 +408,6 @@ export const AccountScreen = ({
       <View
         style={{
           flex: 1,
-          backgroundColor: theme.background,
           justifyContent: "center",
           alignItems: "center",
         }}
@@ -419,7 +418,7 @@ export const AccountScreen = ({
           style={{
             marginTop: 14,
             color: theme.secondary,
-            fontSize: 14,
+            fontSize: 18,
           }}
         >
           Loading account...
@@ -436,19 +435,12 @@ export const AccountScreen = ({
     <KeyboardAvoidingView
       style={{
         flex: 1,
-        backgroundColor: theme.background,
       }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
         style={{
           flex: 1,
-          backgroundColor: theme.background,
-        }}
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: 8,
-          paddingBottom: 40,
         }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -464,22 +456,6 @@ export const AccountScreen = ({
             marginBottom: 18,
           }}
         >
-          <TouchableOpacity
-            onPress={onClose}
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 21,
-              backgroundColor: theme.card,
-              borderWidth: 1,
-              borderColor: theme.border,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Ionicons name="chevron-back" size={23} color={theme.text} />
-          </TouchableOpacity>
-
           <View
             style={{
               flex: 1,
@@ -498,7 +474,7 @@ export const AccountScreen = ({
 
             <Text
               style={{
-                fontSize: 13,
+                fontSize: 17,
                 color: theme.secondary,
                 marginTop: 2,
               }}
@@ -596,7 +572,7 @@ export const AccountScreen = ({
 
           <Text
             style={{
-              fontSize: 14,
+              fontSize: 18,
               color: theme.secondary,
               marginTop: 3,
               textAlign: "center",
@@ -621,7 +597,7 @@ export const AccountScreen = ({
             >
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 16,
                   fontWeight: "700",
                   color: theme.primary,
                 }}
@@ -630,33 +606,6 @@ export const AccountScreen = ({
               </Text>
             </View>
           ) : null}
-
-          <TouchableOpacity
-            onPress={handleImagePress}
-            disabled={isImagePickerVisible}
-            style={{
-              marginTop: 14,
-              flexDirection: "row",
-              alignItems: "center",
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: 10,
-              backgroundColor: theme.cardSecondary,
-            }}
-          >
-            <Ionicons name="image-outline" size={17} color={theme.primary} />
-
-            <Text
-              style={{
-                marginLeft: 7,
-                color: theme.text,
-                fontSize: 13,
-                fontWeight: "700",
-              }}
-            >
-              Change profile photo
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* ================================================================ */}
@@ -698,7 +647,7 @@ export const AccountScreen = ({
             <View style={{ marginLeft: 10 }}>
               <Text
                 style={{
-                  fontSize: 17,
+                  fontSize: 19,
                   fontWeight: "800",
                   color: theme.text,
                 }}
@@ -708,7 +657,7 @@ export const AccountScreen = ({
 
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 16,
                   color: theme.secondary,
                   marginTop: 2,
                 }}
@@ -818,7 +767,7 @@ export const AccountScreen = ({
             >
               <Text
                 style={{
-                  fontSize: 17,
+                  fontSize: 19,
                   fontWeight: "800",
                   color: theme.text,
                 }}
@@ -828,7 +777,7 @@ export const AccountScreen = ({
 
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 16,
                   color: theme.secondary,
                   marginTop: 2,
                 }}
@@ -872,7 +821,7 @@ export const AccountScreen = ({
             >
               <Text
                 style={{
-                  fontSize: 15,
+                  fontSize: 19,
                   fontWeight: "700",
                   color: theme.text,
                 }}
@@ -882,7 +831,7 @@ export const AccountScreen = ({
 
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 16,
                   color: theme.secondary,
                   marginTop: 3,
                 }}
@@ -931,7 +880,7 @@ export const AccountScreen = ({
               <Text
                 style={{
                   marginLeft: 8,
-                  fontSize: 16,
+                  fontSize: 19,
                   fontWeight: "800",
                   color: theme.primaryText,
                 }}
@@ -958,7 +907,7 @@ export const AccountScreen = ({
         >
           <Text
             style={{
-              fontSize: 15,
+              fontSize: 19,
               fontWeight: "700",
               color: theme.secondary,
             }}

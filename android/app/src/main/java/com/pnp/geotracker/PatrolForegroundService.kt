@@ -179,7 +179,7 @@ class PatrolForegroundService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Project J.O.E.M.A.R")
+            .setContentTitle("Project PATROL")
             .setContentText("Patrol tracking is active")
             .setOngoing(true)
             .setContentIntent(openPendingIntent)

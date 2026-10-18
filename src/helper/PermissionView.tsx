@@ -115,11 +115,10 @@ export const PermissionView = ({
       >
         {loading ? (
           <>
-            <ActivityIndicator size="small" color={colors.primaryText} />
             <Text
               style={{
                 color: colors.primaryText,
-                fontSize: 12,
+                fontSize: 16,
                 fontWeight: "800",
                 marginLeft: 6,
               }}
@@ -129,16 +128,10 @@ export const PermissionView = ({
           </>
         ) : (
           <>
-            <Ionicons
-              name="power-outline"
-              size={15}
-              color={colors.primaryText}
-              style={{ marginRight: 5 }}
-            />
             <Text
               style={{
                 color: colors.primaryText,
-                fontSize: 12,
+                fontSize: 16,
                 fontWeight: "800",
                 letterSpacing: 0.5,
               }}
@@ -207,7 +200,7 @@ export const PermissionView = ({
               <Text
                 style={{
                   color: colors.text,
-                  fontSize: 16,
+                  fontSize: 20,
                   fontWeight: "800",
                   letterSpacing: 0.3,
                 }}
@@ -218,7 +211,7 @@ export const PermissionView = ({
               <Text
                 style={{
                   color: colors.muted,
-                  fontSize: 12,
+                  fontSize: 16,
                   marginTop: 2,
                 }}
               >
@@ -242,11 +235,11 @@ export const PermissionView = ({
             <Text
               style={{
                 color: allReady ? colors.success : colors.warning,
-                fontSize: 12,
+                fontSize: 16,
                 fontWeight: "800",
               }}
             >
-              {completedCount}/3 READY
+              {completedCount}/3
             </Text>
           </View>
         </View>
@@ -301,7 +294,7 @@ export const PermissionView = ({
             <Text
               style={{
                 color: colors.text,
-                fontSize: 14,
+                fontSize: 18,
                 fontWeight: "700",
               }}
             >
@@ -311,7 +304,7 @@ export const PermissionView = ({
             <Text
               style={{
                 color: foregroundGranted ? colors.success : colors.muted,
-                fontSize: 11,
+                fontSize: 15,
                 marginTop: 2,
               }}
             >
@@ -359,7 +352,7 @@ export const PermissionView = ({
             <Text
               style={{
                 color: colors.text,
-                fontSize: 14,
+                fontSize: 18,
                 fontWeight: "700",
               }}
             >
@@ -369,7 +362,7 @@ export const PermissionView = ({
             <Text
               style={{
                 color: backgroundGranted ? colors.success : colors.muted,
-                fontSize: 11,
+                fontSize: 15,
                 marginTop: 2,
               }}
             >
@@ -419,7 +412,7 @@ export const PermissionView = ({
             <Text
               style={{
                 color: colors.text,
-                fontSize: 14,
+                fontSize: 18,
                 fontWeight: "700",
               }}
             >
@@ -429,7 +422,7 @@ export const PermissionView = ({
             <Text
               style={{
                 color: isGpsEnabled ? colors.success : colors.muted,
-                fontSize: 11,
+                fontSize: 15,
                 marginTop: 2,
               }}
             >
@@ -469,7 +462,7 @@ export const PermissionView = ({
           >
             <Ionicons
               name="information-circle-outline"
-              size={16}
+              size={20}
               color={colors.muted}
               style={{ marginTop: 1, marginRight: 7 }}
             />
@@ -478,7 +471,7 @@ export const PermissionView = ({
               style={{
                 flex: 1,
                 color: colors.muted,
-                fontSize: 11,
+                fontSize: 15,
                 lineHeight: 16,
               }}
             >

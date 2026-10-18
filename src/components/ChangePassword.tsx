@@ -341,7 +341,7 @@ const ChangePassword = ({
 
                 <Text
                   style={{
-                    fontSize: 13,
+                    fontSize: 16,
                     marginTop: 3,
                     color: colors.textSecondary,
                   }}
@@ -377,7 +377,7 @@ const ChangePassword = ({
             <View style={{ marginBottom: 16 }}>
               <Text
                 style={{
-                  fontSize: 14,
+                  fontSize: 17,
                   fontWeight: "600",
                   marginBottom: 7,
                   color: isDarkTheme ? "#FFFFFF" : "#1E293B",
@@ -420,7 +420,7 @@ const ChangePassword = ({
                     height: 50,
                     paddingHorizontal: 12,
                     color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                    fontSize: 16,
+                    fontSize: 20,
                   }}
                 />
 
@@ -449,7 +449,7 @@ const ChangePassword = ({
             <View style={{ marginBottom: 16 }}>
               <Text
                 style={{
-                  fontSize: 14,
+                  fontSize: 17,
                   fontWeight: "600",
                   marginBottom: 7,
                   color: isDarkTheme ? "#FFFFFF" : "#1E293B",
@@ -497,7 +497,7 @@ const ChangePassword = ({
                     height: 50,
                     paddingHorizontal: 12,
                     color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                    fontSize: 16,
+                    fontSize: 20,
                   }}
                 />
 
@@ -526,7 +526,7 @@ const ChangePassword = ({
             <View style={{ marginBottom: 22 }}>
               <Text
                 style={{
-                  fontSize: 14,
+                  fontSize: 17,
                   fontWeight: "600",
                   marginBottom: 7,
                   color: isDarkTheme ? "#FFFFFF" : "#1E293B",
@@ -575,7 +575,7 @@ const ChangePassword = ({
                     height: 50,
                     paddingHorizontal: 12,
                     color: isDarkTheme ? "#FFFFFF" : "#0F172A",
-                    fontSize: 16,
+                    fontSize: 20,
                   }}
                 />
 
@@ -611,7 +611,7 @@ const ChangePassword = ({
             >
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 16,
                   fontWeight: "600",
                   color: isDarkTheme ? "#CBD5E1" : "#475569",
                   marginBottom: 7,
@@ -638,7 +638,7 @@ const ChangePassword = ({
                 <Text
                   style={{
                     marginLeft: 6,
-                    fontSize: 12,
+                    fontSize: 16,
                     color: colors.textSecondary,
                   }}
                 >
@@ -661,7 +661,7 @@ const ChangePassword = ({
                 <Text
                   style={{
                     marginLeft: 6,
-                    fontSize: 12,
+                    fontSize: 16,
                     color: colors.textSecondary,
                   }}
                 >
@@ -753,7 +753,7 @@ const ChangePassword = ({
             >
               <Text
                 style={{
-                  fontSize: 15,
+                  fontSize: 17,
                   fontWeight: "600",
                   color: colors.textSecondary,
                 }}

@@ -15,13 +15,14 @@ import Constants from "expo-constants";
 import FCMModule from "../services/FCM";
 import SignalStrengthModule from "../services/SignalStrengthModule";
 
-import { Personnel, Schedule } from "../types";
+import { Personnel, PersonnelLog, Schedule } from "../types";
 
 import {
   getPersonnelById,
   findCandidatePersonnel,
   getScheduleByPersonnel,
   insertPatrolLogs,
+  getPatrolLogs,
 } from "../services/database";
 
 import {
@@ -73,6 +74,7 @@ interface PatrolStatus {
 
 export const formatManilaTimestamp = (isShiftActive: boolean): string => {
   const d = new Date();
+
   const utc = d.getTime() + d.getTimezoneOffset() * 60000;
   const manilaDate = new Date(utc);
 
@@ -82,16 +84,31 @@ export const formatManilaTimestamp = (isShiftActive: boolean): string => {
     manilaDate.setSeconds(manilaDate.getSeconds() + 30);
   }
 
-  return `${manilaDate.getFullYear()}-${pad(
-    manilaDate.getMonth() + 1,
-  )}-${pad(manilaDate.getDate())}T${pad(
-    manilaDate.getHours(),
-  )}:${pad(manilaDate.getMinutes())}:${pad(manilaDate.getSeconds())}Z`;
+  return `${manilaDate.getFullYear()}-${pad(manilaDate.getMonth() + 1)}-${pad(
+    manilaDate.getDate(),
+  )}T${pad(manilaDate.getHours())}:${pad(manilaDate.getMinutes())}:${pad(
+    manilaDate.getSeconds(),
+  )}Z`;
 };
 
 export const usePatrolState = () => {
+  // ============================================================
+  // PERSONNEL / SCHEDULE
+  // ============================================================
+
   const [personnel, setPersonnel] = useState<Personnel | null>(null);
+
   const [schedule, setSchedule] = useState<Schedule[] | null>(null);
+
+  // ============================================================
+  // LOCAL PERSONNEL LOGS
+  // ============================================================
+
+  const [personnelLogs, setPersonnelLogs] = useState<PersonnelLog[]>([]);
+
+  // ============================================================
+  // PATROL STATUS
+  // ============================================================
 
   const [patrolStatus, setPatrolStatus] = useState<PatrolStatus>({
     running: false,
@@ -110,9 +127,14 @@ export const usePatrolState = () => {
   const [autoSync, setAutoSync] = useState(true);
 
   const [isSyncing, setIsSyncing] = useState(false);
+
   const [isPatrolStarting, setIsPatrolStarting] = useState(false);
 
   const [is2FAEnabled, setIs2FAEnabled] = useState(false);
+
+  // ============================================================
+  // GPS
+  // ============================================================
 
   const [gpsLoading, setGpsLoading] = useState(false);
 
@@ -130,11 +152,19 @@ export const usePatrolState = () => {
     boolean | null
   >(null);
 
+  // ============================================================
+  // DUTY
+  // ============================================================
+
   const [activeDutyType, setActiveDutyType] = useState<string | null>(
-    "Foot Patrol",
+    "Foot Patrolling",
   );
 
   const [isWithinScheduledTime, setIsWithinScheduledTime] = useState(false);
+
+  // ============================================================
+  // BUILD PERSONNEL
+  // ============================================================
 
   const buildPersonnel = (remoteProfile: any, email: string): Personnel => ({
     id: remoteProfile.id,
@@ -153,6 +183,30 @@ export const usePatrolState = () => {
     viberNumber: remoteProfile.viber_number,
   });
 
+  // ============================================================
+  // LOAD PERSONNEL LOGS
+  // ============================================================
+
+  const loadPersonnelLogs = useCallback(async () => {
+    try {
+      const logs = await getPatrolLogs();
+
+      if (Array.isArray(logs)) {
+        setPersonnelLogs(logs);
+      } else {
+        setPersonnelLogs([]);
+      }
+    } catch (error) {
+      console.error("Failed to load personnel logs:", error);
+
+      setPersonnelLogs([]);
+    }
+  }, []);
+
+  // ============================================================
+  // REFRESH PATROL STATUS
+  // ============================================================
+
   const refreshPatrolStatus = useCallback(async () => {
     try {
       const status = await PatrolService.getPatrolStatus();
@@ -166,6 +220,10 @@ export const usePatrolState = () => {
     }
   }, []);
 
+  // ============================================================
+  // UPDATE UNSYNCED COUNTER
+  // ============================================================
+
   const updateUnsyncedCounter = useCallback(async () => {
     try {
       const status = await PatrolService.getPatrolStatus();
@@ -175,6 +233,10 @@ export const usePatrolState = () => {
       console.warn(e);
     }
   }, []);
+
+  // ============================================================
+  // LOCATION PERMISSION
+  // ============================================================
 
   const checkLocationPermissionState = useCallback(async () => {
     try {
@@ -240,6 +302,7 @@ export const usePatrolState = () => {
       await Location.enableNetworkProviderAsync();
 
       const enabled = await checkLocationPermissionState();
+
       setIsGpsEnabled(enabled);
       setGpsLoading(false);
 
@@ -265,11 +328,16 @@ export const usePatrolState = () => {
     }
   };
 
+  // ============================================================
+  // PATROL SERVICE EVENTS
+  // ============================================================
+
   const emitter = new NativeEventEmitter(NativeModules.PatrolService);
+
   useEffect(() => {
     const subscription = emitter.addListener("PATROL_STOPPED", async () => {
       setIsPatrolStarting(true);
-      // Wait until PatrolManager reports running
+
       let running = false;
 
       for (let i = 0; i < 20; i++) {
@@ -282,18 +350,30 @@ export const usePatrolState = () => {
 
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
+
       await updateUnsyncedCounter();
+
+      // Refresh recent logs whenever patrol
+      // service reports a change.
+      await loadPersonnelLogs();
+
       setIsShiftActive(running);
       setIsPatrolStarting(running);
     });
 
     return () => subscription.remove();
-  }, []);
+  }, [updateUnsyncedCounter, loadPersonnelLogs]);
+
+  // ============================================================
+  // INITIAL GPS / PATROL STATUS
+  // ============================================================
 
   useEffect(() => {
     checkLocationPermissionState();
 
     refreshPatrolStatus();
+
+    loadPersonnelLogs();
 
     const interval = setInterval(() => {
       checkLocationPermissionState();
@@ -301,7 +381,11 @@ export const usePatrolState = () => {
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [checkLocationPermissionState, refreshPatrolStatus]);
+  }, [checkLocationPermissionState, refreshPatrolStatus, loadPersonnelLogs]);
+
+  // ============================================================
+  // SETTINGS
+  // ============================================================
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -319,6 +403,10 @@ export const usePatrolState = () => {
     loadSettings();
   }, []);
 
+  // ============================================================
+  // LOAD SCHEDULE WHEN PERSONNEL CHANGES
+  // ============================================================
+
   useEffect(() => {
     if (!personnel) return;
 
@@ -330,8 +418,16 @@ export const usePatrolState = () => {
       }
 
       await refreshPatrolStatus();
+
+      // Refresh logs for the currently
+      // authenticated personnel.
+      await loadPersonnelLogs();
     })();
-  }, [personnel, refreshPatrolStatus]);
+  }, [personnel, refreshPatrolStatus, loadPersonnelLogs]);
+
+  // ============================================================
+  // PATROL STATUS REFRESH
+  // ============================================================
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -341,26 +437,20 @@ export const usePatrolState = () => {
     return () => clearInterval(timer);
   }, [refreshPatrolStatus]);
 
-  // const toggleAutoSync = async () => {
-  //   try {
-  //     const next = !autoSync;
-
-  //     setAutoSync(next);
-
-  //     await AsyncStorage.setItem("@pnp_auto_sync", String(next));
-  //   } catch (e) {
-  //     console.warn(e);
-  //   }
-  // };
+  // ============================================================
+  // CHECK SCHEDULED TIME
+  // ============================================================
 
   const checkIfWithinScheduledTime = useCallback(() => {
     if (!schedule || schedule.length === 0) {
       setIsWithinScheduledTime(false);
       setActiveDutyType(null);
+
       return false;
     }
 
     const now = new Date();
+
     const today = now.toISOString().split("T")[0];
 
     let active = false;
@@ -401,10 +491,15 @@ export const usePatrolState = () => {
     }
 
     setIsWithinScheduledTime(active);
+
     setActiveDutyType(duty);
 
     return active;
   }, [schedule]);
+
+  // ============================================================
+  // COMPLETE LOGIN
+  // ============================================================
 
   const completeLogin = async (pUser: Personnel, emailInput: string) => {
     setPersonnel(pUser);
@@ -416,6 +511,9 @@ export const usePatrolState = () => {
     }
 
     await refreshPatrolStatus();
+
+    // Load local patrol logs after login.
+    await loadPersonnelLogs();
 
     try {
       const token = await FCMModule.getToken();
@@ -432,6 +530,10 @@ export const usePatrolState = () => {
       console.warn("Error: ", err);
     }
   };
+
+  // ============================================================
+  // LOGIN
+  // ============================================================
 
   const login = async (
     emailInput: string,
@@ -584,6 +686,10 @@ export const usePatrolState = () => {
     }
   };
 
+  // ============================================================
+  // LOGOUT
+  // ============================================================
+
   const logout = useCallback(async () => {
     try {
       if (patrolStatus.running) {
@@ -603,6 +709,7 @@ export const usePatrolState = () => {
 
     setPersonnel(null);
     setSchedule(null);
+    setPersonnelLogs([]);
     setIsShiftActive(false);
 
     setPatrolStatus({
@@ -616,12 +723,17 @@ export const usePatrolState = () => {
     });
   }, [patrolStatus.running]);
 
+  // ============================================================
+  // EMERGENCY SOS
+  // ============================================================
+
   const triggerEmergencySOS = async (): Promise<boolean> => {
     if (!personnel) {
       Alert.alert(
         "Authentication Error",
         "You must be logged in to send an SOS.",
       );
+
       return false;
     }
 
@@ -639,7 +751,7 @@ export const usePatrolState = () => {
 
         await insertPatrolLogs([
           {
-            id: "", //crypto.randomUUID(),
+            id: "",
             personnelId: personnel.id,
             personnel: {
               fullname: personnel.fullname,
@@ -656,6 +768,10 @@ export const usePatrolState = () => {
         ]);
 
         await updateUnsyncedCounter();
+
+        // Immediately make the new SOS
+        // location available to Recent Logs.
+        await loadPersonnelLogs();
 
         return true;
       } catch (e) {
@@ -687,7 +803,7 @@ export const usePatrolState = () => {
 
                 await insertPatrolLogs([
                   {
-                    id: "", //crypto.randomUUID(),
+                    id: "",
                     personnelId: personnel.id,
                     personnel: {
                       fullname: personnel.fullname,
@@ -704,6 +820,8 @@ export const usePatrolState = () => {
                 ]);
 
                 await updateUnsyncedCounter();
+
+                await loadPersonnelLogs();
 
                 Alert.alert(
                   "SOS Sent",
@@ -725,6 +843,10 @@ export const usePatrolState = () => {
     });
   };
 
+  // ============================================================
+  // REGISTER USER
+  // ============================================================
+
   const registerUser = async (registrationData: {
     email: string;
     badge_number: string;
@@ -736,7 +858,10 @@ export const usePatrolState = () => {
     viber_number: string;
     password?: string;
     photoUri: string;
-  }): Promise<{ success: boolean; message: string }> => {
+  }): Promise<{
+    success: boolean;
+    message: string;
+  }> => {
     try {
       const token = await FCMModule.getToken();
 
@@ -766,7 +891,13 @@ export const usePatrolState = () => {
       if (registrationData.photoUri) {
         const resized = await manipulateAsync(
           registrationData.photoUri,
-          [{ resize: { width: 800 } }],
+          [
+            {
+              resize: {
+                width: 800,
+              },
+            },
+          ],
           {
             compress: 0.7,
             format: SaveFormat.JPEG,
@@ -815,6 +946,10 @@ export const usePatrolState = () => {
     }
   };
 
+  // ============================================================
+  // REFRESH PERSONNEL
+  // ============================================================
+
   const refreshPersonnel = useCallback(async () => {
     if (!personnel) return;
 
@@ -831,7 +966,12 @@ export const usePatrolState = () => {
     }
 
     await refreshPatrolStatus();
-  }, [personnel, refreshPatrolStatus]);
+    await loadPersonnelLogs();
+  }, [personnel, refreshPatrolStatus, loadPersonnelLogs]);
+
+  // ============================================================
+  // TOGGLE PATROL SHIFT
+  // ============================================================
 
   const toggleShift = async () => {
     if (!personnel) return;
@@ -859,9 +999,11 @@ export const usePatrolState = () => {
 
     try {
       setIsPatrolStarting(true);
+
       const status = await PatrolService.getPatrolStatus();
 
-      var stopped = false;
+      let stopped = false;
+
       if (status.running) {
         await PatrolService.stopService();
         stopped = true;
@@ -872,10 +1014,13 @@ export const usePatrolState = () => {
           "personnel.id: ",
           personnel.id,
         );
-        await PatrolService.startPatrol(activeDutyType ?? "", personnel.id);
+
+        await PatrolService.startPatrol(
+          activeDutyType ?? "Foot Patrolling",
+          personnel.id,
+        );
       }
 
-      // Wait until PatrolManager reports running
       let running = false;
 
       for (let i = 0; i < 20; i++) {
@@ -897,32 +1042,43 @@ export const usePatrolState = () => {
       );
 
       await refreshPatrolStatus();
+
+      // Reload local logs after changing patrol state.
+      await loadPersonnelLogs();
+
       setIsPatrolStarting(false);
     } catch (err: any) {
       Alert.alert(
         "Service Error",
         err.message ?? "Unable to control patrol service.",
       );
+
       setIsPatrolStarting(false);
     }
   };
+
+  // ============================================================
+  // ENABLE 2FA
+  // ============================================================
 
   const enable2FA = async (
     user_id: string,
     code: string,
     factorId?: string,
   ): Promise<boolean> => {
-    // Use ref to get current personnel to avoid stale closure issues
-    // console.log("personnel: ", personnel);
     if (!user_id) return false;
+
     try {
       let activeFactorId = factorId;
+
       console.log("activeFactorId: ", activeFactorId);
+
       if (!activeFactorId) {
         activeFactorId =
           (await AsyncStorage.getItem(
             `@pnp_supabase_mfa_factor_id_${user_id}`,
           )) || "";
+
         if (!activeFactorId) {
           throw new Error("No MFA factor ID found. Please enroll MFA first.");
         }
@@ -935,6 +1091,7 @@ export const usePatrolState = () => {
           "Verification Failed",
           "The 6-digit MFA verification code is invalid, expired, or has already been used.",
         );
+
         return false;
       }
 
@@ -942,56 +1099,69 @@ export const usePatrolState = () => {
         `@pnp_supabase_mfa_factor_id_${user_id}`,
         activeFactorId,
       );
+
       setIs2FAEnabled(true);
+
       Alert.alert(
         "MFA Secured",
         "Supabase Multi-Factor Authentication (MFA) has been successfully verified and active for your officer profile!",
       );
+
       return true;
     } catch (e) {
       console.error(e);
+
       Alert.alert(
         "Setup Error",
         "An error occurred while enabling Supabase MFA.",
       );
+
       return false;
     }
   };
 
+  // ============================================================
+  // DISABLE 2FA
+  // ============================================================
+
   const disable2FA = async () => {
-    // Use ref to get current personnel to avoid stale closure issues
     if (!personnel) return;
+
     try {
-      // Use personnel.id as the key for AsyncStorage to ensure consistency
       const personnelIdKey = personnel.id;
+
       const factorId =
         (await AsyncStorage.getItem(
           `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
         )) ?? "";
 
       await unenrollMFA(factorId);
+
       await AsyncStorage.removeItem(
         `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
       ).catch(() => {});
 
-      // Clean up legacy keys
       await AsyncStorage.removeItem(
         `@pnp_google_authenticator_mfa_secret_${personnelIdKey}`,
       ).catch(() => {});
+
       await AsyncStorage.removeItem(
         `@pnp_google_authenticator_mfa_secret_${personnel.badgeNumber}`,
       ).catch(() => {});
+
       await AsyncStorage.removeItem(
         `@pnp_2fa_secret_${personnel.badgeNumber}`,
       ).catch(() => {});
 
       setIs2FAEnabled(false);
+
       Alert.alert(
         "MFA Disabled",
         "Supabase Multi-Factor Authentication (MFA) is now disabled. Warning: Your officer profile is no longer protected by MFA.",
       );
     } catch (e) {
       console.error(e);
+
       Alert.alert(
         "Disable Error",
         "An error occurred while disabling Supabase multi-factor authentication.",
@@ -999,69 +1169,114 @@ export const usePatrolState = () => {
     }
   };
 
+  // ============================================================
+  // SYNC LOGS
+  // ============================================================
+
   const syncLogsWithRemote = async (showPromptAndAlerts: boolean = true) => {
     if (isSyncing) return;
+
     setIsSyncing(true);
 
     try {
-      var uploaded = await PatrolService.uploadUnsyncedLogs();
+      const uploaded = await PatrolService.uploadUnsyncedLogs();
 
-      Alert.alert(
-        uploaded > 0 ? "Successfully uploaded" : "Up to Date",
-        uploaded > 0
-          ? "Your logs has been successfully uploaded to the database."
-          : "No pending coordinate logs inside local storage cache require syncing.",
-      );
+      if (showPromptAndAlerts) {
+        Alert.alert(
+          uploaded > 0 ? "Successfully uploaded" : "Up to Date",
+          uploaded > 0
+            ? "Your logs has been successfully uploaded to the database."
+            : "No pending coordinate logs inside local storage cache require syncing.",
+        );
+      }
 
       await refreshPatrolStatus();
+
+      // IMPORTANT:
+      // Refresh the logs after synchronization too.
+      await loadPersonnelLogs();
+
       setIsSyncing(false);
     } catch (error) {
       setIsSyncing(false);
+
       console.error(error);
     }
   };
 
+  // ============================================================
+  // RETURN
+  // ============================================================
+
   return {
+    // Personnel
     personnel,
+
+    // Schedule
     schedule,
+
+    // Personnel Logs
+    personnelLogs,
+    loadPersonnelLogs,
+
+    // Patrol
     unsyncedCount,
     patrolStatus,
+    isShiftActive,
 
+    // GPS
     isGpsEnabled,
     foregroundGranted,
     backgroundGranted,
+    notificationGranted,
     gpsLoading,
 
+    // Sync
     isSyncing,
     isPatrolStarting,
     autoSync,
+
+    // MFA
     is2FAEnabled,
 
+    // Login / Logout
     login,
     logout,
 
+    // Patrol controls
     toggleShift,
-
     refreshPatrolStatus,
+
+    // Logs
     syncLogsWithRemote,
 
+    // Permissions
     requestForegroundPermission,
     requestBackgroundPermission,
 
+    // GPS controls
     enableGpsInline,
     openSystemSettings,
 
-    // toggleAutoSync,
-
+    // MFA controls
     enable2FA,
     disable2FA,
 
+    // Registration
     registerUser,
+
+    // Personnel
     refreshPersonnel,
 
+    // SOS
     triggerEmergencySOS,
 
+    // Duty
     activeDutyType,
     setActiveDutyType,
+
+    // Schedule state
+    isWithinScheduledTime,
+    checkIfWithinScheduledTime,
   };
 };

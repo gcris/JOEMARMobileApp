@@ -993,7 +993,7 @@ export const LoginView = ({
                 },
               ]}
             >
-              PROJECT J.O.E.M.A.R • v1.0
+              PROJECT P.A.T.R.O.L • v1.0
             </Text>
 
             <View
@@ -1813,7 +1813,7 @@ export const LoginView = ({
               },
             ]}
           >
-            Project J.O.E.M.A.R
+            Project P.A.T.R.O.L
           </Text>
         </View>
       </ScrollView>

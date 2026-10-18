@@ -40,32 +40,73 @@ class SupabaseApi {
     ): Boolean {
 
         try {
+             val validLocations = locations.filter {
+                it.personnelId.isNotBlank()
+            }
 
-            Log.d(TAG, BuildConfig.SUPABASE_URL)
+            val invalidCount = locations.size - validLocations.size
+
+            Log.d(TAG, "Total locations: ${locations.size}")
+            Log.d(TAG, "Valid locations: ${validLocations.size}")
+            Log.w(TAG, "Empty personnelId records: $invalidCount")
+
+            if (validLocations.isEmpty()) {
+                Log.w(TAG, "No valid locations to upload")
+                return false
+            }
 
             val jsonArray = JSONArray()
 
-            locations.forEach { location ->
-
-                val obj = JSONObject()
-
-                Log.d(TAG, "personnel_id: ${location.personnelId}")
-                Log.d(TAG, "dutyType: ${location.dutyType}")
-
-                obj.put("personnel_id", location.personnelId)
-                obj.put("duty_type", location.dutyType)
-                obj.put("latitude", location.latitude)
-                obj.put("longitude", location.longitude)
-                // obj.put("accuracy", location.accuracy)
-                obj.put("speed", location.speed)
-                // obj.put("altitude", location.altitude)
-                // obj.put("bearing", location.bearing)
-                obj.put("captured_at", formatTimestamp(location.timestamp))
-                obj.put("network_signal", location.networkSignal)
+            validLocations.forEach { location ->
+                val obj = JSONObject().apply {
+                    put("personnel_id", location.personnelId)
+                    put(
+                        "duty_type",
+                        location.dutyType
+                            .takeIf { it.isNotBlank() }
+                            ?: "Foot Patrolling"
+                    )
+                    put("latitude", location.latitude)
+                    put("longitude", location.longitude)
+                    put("speed", location.speed)
+                    put("captured_at", formatTimestamp(location.timestamp))
+                    put("network_signal", location.networkSignal)
+                }
 
                 jsonArray.put(obj)
-
             }
+
+
+            Log.d(TAG, BuildConfig.SUPABASE_URL)
+
+            // val jsonArray = JSONArray()
+
+            // locations.forEach { location ->
+
+            //     val obj = JSONObject()
+
+            //     val personnelId = location.personnelId
+            //     val dutyType = location.dutyType
+            //         ?.takeIf { it.isNotBlank() }
+            //         ?: "Foot Patrolling"
+
+            //     Log.d(TAG, "personnel_id BEFORE JSON: [$personnelId]")
+            //     Log.d(TAG, "duty_type BEFORE JSON: [$dutyType]")
+
+            //     obj.put("personnel_id", personnelId)
+            //     obj.put("duty_type", dutyType)
+            //     obj.put("latitude", location.latitude)
+            //     obj.put("longitude", location.longitude)
+            //     // obj.put("accuracy", location.accuracy)
+            //     obj.put("speed", location.speed)
+            //     // obj.put("altitude", location.altitude)
+            //     // obj.put("bearing", location.bearing)
+            //     obj.put("captured_at", formatTimestamp(location.timestamp))
+            //     obj.put("network_signal", location.networkSignal)
+
+            //     jsonArray.put(obj)
+
+            // }
 
             Log.d(TAG, jsonArray.toString())
             

@@ -1,31 +1,28 @@
 import "react-native-gesture-handler";
-import React, { useState, useEffect } from "react";
-import {
-  StatusBar,
-  SafeAreaView,
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  AppState,
-  Alert,
-} from "react-native";
-import { NavigationContainer, RouteProp } from "@react-navigation/native";
-import { createStackNavigator } from "@react-navigation/stack";
-import { StackNavigationProp } from "@react-navigation/stack";
+import React, { useState, useEffect, useCallback } from "react";
+import { StatusBar, View, Text } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Location from "expo-location";
+import { NavigationContainer, RouteProp } from "@react-navigation/native";
+import {
+  createStackNavigator,
+  StackNavigationProp,
+} from "@react-navigation/stack";
+
 import { usePatrolState } from "./src/hooks/usePatrolState";
 import { getStyles, getThemeColors } from "./src/theme/styles";
+
 import { LoginView } from "./src/components/LoginView";
 import { RegisterView } from "./src/components/RegisterView";
 import { DashboardView } from "./src/components/DashboardView";
 import { TopCommandHeader } from "./src/components/TopCommandHeader";
-import { AnimatedSplashScreen } from "./src/components/AnimatedSplashScreen";
 import { AccountScreen } from "./src/components/AccountScreen";
 import SosAlertModal from "./src/components/SosAlertModal";
-// import { syncPendingPatrolLogs } from "./src/services/database";
 import { ForgotPasswordScreen } from "./src/components/ForgotPasswordScreen";
+import { AnimatedSplashScreen } from "./src/components/AnimatedSplashScreen";
+
+// ============================================================
+// TYPES
+// ============================================================
 
 type RootStackParamList = {
   Main: undefined;
@@ -37,87 +34,57 @@ type RootStackParamList = {
 
 const Stack = createStackNavigator<RootStackParamList>();
 
+// ============================================================
+// STORAGE
+// ============================================================
+
+const THEME_STORAGE_KEY = "@pnp_geo_tracker_theme";
+
+// ============================================================
+// APP
+// ============================================================
+
 export default function App() {
+  // ----------------------------------------------------------
+  // THEME
+  // ----------------------------------------------------------
+
+  // Default theme while AsyncStorage is being checked.
+  // This value will be replaced by the saved preference.
   const [isDarkTheme, setIsDarkTheme] = useState(true);
+
+  const [themeLoaded, setThemeLoaded] = useState(false);
+
+  // ----------------------------------------------------------
+  // SPLASH / INITIALIZATION
+  // ----------------------------------------------------------
+
   const [showSplash, setShowSplash] = useState(true);
+
   const [viewMode, setViewMode] = useState<
     "login" | "register" | "forgotpassword"
   >("login");
+
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  const [restoreAttempted, setRestoreAttempted] = useState(false);
+
+  // ----------------------------------------------------------
+  // SOS
+  // ----------------------------------------------------------
+
   const [sosAlertData, setSosAlertData] = useState<{
     senderName: string;
     latitude: number;
     longitude: number;
     phone_number: string;
   } | null>(null);
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [restoreAttempted, setRestoreAttempted] = useState(false);
 
-  const colors = getThemeColors(isDarkTheme);
+  // ----------------------------------------------------------
+  // PATROL STATE
+  // ----------------------------------------------------------
 
   const patrolState = usePatrolState();
-
-  // Restore patrol state on app startup
-  // React.useEffect(() => {
-  //   const restorePatrolState = async () => {
-  //     if (restoreAttempted) return; // Prevent multiple restore attempts
-
-  //     setRestoreAttempted(true);
-
-  //     try {
-  //       // Import BackgroundTracker here to avoid circular dependency issues
-  //       const PATROL_STATE_KEY = "@pnp_patrol_active";
-  //       const PATROL_START_TIME_KEY = "@pnp_patrol_start_time";
-  //       const LAST_KNOWN_LOCATION_KEY = "@pnp_last_known_location";
-
-  //       // Check if patrol should be active (survives process recreation)
-  //       const patrolActive =
-  //         (await AsyncStorage.getItem(PATROL_STATE_KEY)) === "true";
-
-  //       console.log("[App] Patrol active from storage:", patrolActive);
-
-  //       if (patrolActive) {
-  //         // Restore UI state to match actual background service status
-  //         const personnelId = await ;
-  //         const startTime = await AsyncStorage.getItem(PATROL_START_TIME_KEY);
-  //         const lastLocationJson = await AsyncStorage.getItem(
-  //           LAST_KNOWN_LOCATION_KEY,
-  //         );
-
-  //         // Update patrol state if we have personnel ID
-  //         if (personnelId) {
-  //           console.log("[App] Restoring patrol for personnel:", personnelId);
-  //           console.log("[App] Patrol started at:", startTime);
-  //           console.log("[App] Last known location:", lastLocationJson);
-
-  //           // Verify location tracking is still active
-  //           // const started = await Location.hasStartedLocationUpdatesAsync(
-  //           //   BackgroundTracker.LOCATION_TASK_NAME,
-  //           // );
-
-  //           // if (!started) {
-  //           //   // Restart tracking if it was interrupted by process kill
-  //           //   console.log(
-  //           //     "[App] Restarting location tracking after process restore",
-  //           //   );
-  //           //   await BackgroundTracker.startBackgroundUpdates();
-  //           // } else {
-  //           //   console.log("[App] Location tracking already active");
-  //           // }
-  //         }
-  //       }
-  //     } catch (error) {
-  //       console.error("[App] Failed to restore patrol state:", error);
-  //     } finally {
-  //       // CRITICAL: Always finish initialization to hide splash screen
-  //       setIsInitializing(false);
-  //     }
-  //   };
-
-  //   // Start restoration after a brief delay to let other initializations complete
-  //   const timer = setTimeout(restorePatrolState, 500);
-
-  //   return () => clearTimeout(timer);
-  // }, [restoreAttempted]); // Only run once
 
   const {
     personnel,
@@ -134,19 +101,122 @@ export default function App() {
     registerUser,
   } = patrolState;
 
-  const handleToggleTheme = () => {
-    setIsDarkTheme(!isDarkTheme);
-  };
+  // ============================================================
+  // LOAD SAVED THEME
+  // ============================================================
 
-  const handleForgotPassword = () => {
+  useEffect(() => {
+    let mounted = true;
+
+    const loadTheme = async () => {
+      try {
+        const savedTheme = await AsyncStorage.getItem(THEME_STORAGE_KEY);
+
+        if (!mounted) return;
+
+        if (savedTheme === "dark") {
+          setIsDarkTheme(true);
+        } else if (savedTheme === "light") {
+          setIsDarkTheme(false);
+        } else {
+          // No saved preference yet.
+          // Keep the default dark theme.
+          setIsDarkTheme(true);
+        }
+      } catch (error) {
+        console.warn("Failed to load saved theme:", error);
+
+        if (mounted) {
+          // Safe fallback
+          setIsDarkTheme(true);
+        }
+      } finally {
+        if (mounted) {
+          setThemeLoaded(true);
+        }
+      }
+    };
+
+    loadTheme();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // ============================================================
+  // SAVE THEME
+  // ============================================================
+
+  useEffect(() => {
+    // Do not save the initial default before the stored
+    // preference has been loaded.
+    if (!themeLoaded) {
+      return;
+    }
+
+    const saveTheme = async () => {
+      try {
+        await AsyncStorage.setItem(
+          THEME_STORAGE_KEY,
+          isDarkTheme ? "dark" : "light",
+        );
+      } catch (error) {
+        console.warn("Failed to save theme:", error);
+      }
+    };
+
+    saveTheme();
+  }, [isDarkTheme, themeLoaded]);
+
+  // ============================================================
+  // INITIALIZATION
+  // ============================================================
+
+  useEffect(() => {
+    if (!themeLoaded) {
+      return;
+    }
+
+    setIsInitializing(false);
+    setRestoreAttempted(true);
+  }, [themeLoaded]);
+
+  // ============================================================
+  // THEME TOGGLE
+  // ============================================================
+
+  const handleToggleTheme = useCallback(() => {
+    setIsDarkTheme((previous) => !previous);
+  }, []);
+
+  // ============================================================
+  // FORGOT PASSWORD
+  // ============================================================
+
+  const handleForgotPassword = useCallback(() => {
     setViewMode("forgotpassword");
-    // Alert.alert(
-    //   "Feature coming soon",
-    //   "Password reset functionality will be available in a future update.",
-    // );
-  };
+  }, []);
 
-  if (showSplash && isInitializing) {
+  // ============================================================
+  // THEME COLORS
+  // ============================================================
+
+  const colors = getThemeColors(isDarkTheme);
+
+  // ============================================================
+  // SPLASH SCREEN
+  // ============================================================
+
+  // Wait until the saved theme has been loaded before allowing
+  // the main UI to render.
+  //
+  // This prevents:
+  //
+  // DARK -> LIGHT -> DARK
+  //
+  // flashing during startup.
+  if (!themeLoaded || showSplash) {
     return (
       <AnimatedSplashScreen
         onFinish={() => setShowSplash(false)}
@@ -155,6 +225,10 @@ export default function App() {
     );
   }
 
+  // ============================================================
+  // LOGIN / REGISTER / FORGOT PASSWORD
+  // ============================================================
+
   if (!personnel) {
     return (
       <NavigationContainer>
@@ -162,6 +236,11 @@ export default function App() {
           barStyle={isDarkTheme ? "light-content" : "dark-content"}
           backgroundColor={colors.bgDark}
         />
+
+        {/* ======================================================
+            REGISTER
+        ====================================================== */}
+
         {viewMode === "register" && (
           <RegisterView
             onRegister={registerUser}
@@ -169,6 +248,11 @@ export default function App() {
             isDarkTheme={isDarkTheme}
           />
         )}
+
+        {/* ======================================================
+            FORGOT PASSWORD
+        ====================================================== */}
+
         {viewMode === "forgotpassword" && (
           <ForgotPasswordScreen
             isDarkTheme={isDarkTheme}
@@ -176,6 +260,11 @@ export default function App() {
             onBack={() => setViewMode("login")}
           />
         )}
+
+        {/* ======================================================
+            LOGIN
+        ====================================================== */}
+
         {viewMode === "login" && (
           <LoginView
             isGpsEnabled={isGpsEnabled}
@@ -193,17 +282,24 @@ export default function App() {
             onForgotPassword={handleForgotPassword}
           />
         )}
-        {/* Show SOS alert modal even when not logged in */}
+
+        {/* ======================================================
+            SOS ALERT
+        ====================================================== */}
+
         <SosAlertModal
           sosAlertData={sosAlertData}
           onClose={() => {
             setSosAlertData(null);
-            // AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
           }}
         />
       </NavigationContainer>
     );
   }
+
+  // ============================================================
+  // AUTHENTICATED APPLICATION
+  // ============================================================
 
   return (
     <NavigationContainer>
@@ -211,7 +307,16 @@ export default function App() {
         barStyle={isDarkTheme ? "light-content" : "dark-content"}
         backgroundColor={colors.bgDark}
       />
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+        }}
+      >
+        {/* ====================================================
+            MAIN
+        ==================================================== */}
+
         <Stack.Screen name="Main">
           {(props) => (
             <MainApp
@@ -219,54 +324,68 @@ export default function App() {
               isDarkTheme={isDarkTheme}
               handleToggleTheme={handleToggleTheme}
               logout={logout}
-              patrolState={patrolState} // <-- PASS THE ENTIRE STATE OBJECT HERE
+              patrolState={patrolState}
               sosAlertData={sosAlertData}
               onSosAlertClose={() => {
                 setSosAlertData(null);
-                // AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
               }}
             />
           )}
         </Stack.Screen>
+
+        {/* ====================================================
+            ACCOUNT
+        ==================================================== */}
+
         <Stack.Screen name="Account" component={AccountScreenWrapper} />
       </Stack.Navigator>
-      {/* SOS Alert Modal */}
+
+      {/* ======================================================
+          GLOBAL SOS ALERT
+      ====================================================== */}
+
       <SosAlertModal
         sosAlertData={sosAlertData}
         onClose={() => {
           setSosAlertData(null);
-          // AsyncStorage.removeItem("@pnp_sos_alert_data").catch(() => {});
         }}
       />
     </NavigationContainer>
   );
 }
 
-// UPDATE MainApp TO ACCEPT patrolState AS A PROP
+// ============================================================
+// MAIN APP
+// ============================================================
+
 function MainApp({
   isDarkTheme,
   handleToggleTheme,
   logout,
-  patrolState, // <-- Receive it here
-  sosAlertData, // <-- Receive SOS alert data
-  onSosAlertClose, // <-- Receive callback to close SOS alert
+  patrolState,
+  sosAlertData,
+  onSosAlertClose,
 }: {
   isDarkTheme: boolean;
   handleToggleTheme: () => void;
   logout: () => void;
-  patrolState: ReturnType<typeof usePatrolState>; // <-- Type it using ReturnType
+  patrolState: ReturnType<typeof usePatrolState>;
   sosAlertData: {
     senderName: string;
     latitude: number;
     longitude: number;
     phone_number: string;
-  } | null; // <-- SOS alert data
-  onSosAlertClose: () => void; // <-- Callback to close SOS alert
+  } | null;
+  onSosAlertClose: () => void;
 }) {
-  // DESTUCTURE FROM THE PROP, DO NOT CALL usePatrolState() AGAIN
+  // ----------------------------------------------------------
+  // PATROL STATE
+  // ----------------------------------------------------------
+
   const {
     personnel,
     schedule,
+    personnelLogs,
     patrolStatus,
     isGpsEnabled,
     foregroundGranted,
@@ -279,7 +398,6 @@ function MainApp({
     openSystemSettings,
     triggerEmergencySOS,
     autoSync,
-    // toggleAutoSync,
     is2FAEnabled,
     enable2FA,
     disable2FA,
@@ -290,16 +408,32 @@ function MainApp({
     activeDutyType,
   } = patrolState;
 
+  // ----------------------------------------------------------
+  // THEME
+  // ----------------------------------------------------------
+
   const styles = getStyles(isDarkTheme);
   const colors = getThemeColors(isDarkTheme);
 
+  // ----------------------------------------------------------
+  // RENDER
+  // ----------------------------------------------------------
+
   return (
     <>
+      {/* ======================================================
+          COMMAND HEADER
+      ====================================================== */}
+
       <TopCommandHeader
         onLogout={logout}
         isDarkTheme={isDarkTheme}
         onToggleTheme={handleToggleTheme}
       />
+
+      {/* ======================================================
+          ACTIVE PATROL NOTIFICATION
+      ====================================================== */}
 
       {patrolStatus.running && (
         <View style={styles.patrolNotificationBar}>
@@ -307,26 +441,23 @@ function MainApp({
             <Text style={styles.patrolNotificationTitle}>
               ACTIVE SHIFT PATROL ENGAGED
             </Text>
+
             <Text style={styles.patrolNotificationSub}>
               Background GPS active. Coordinates log to local storage even when
               closed.
             </Text>
           </View>
-          {/* <TouchableOpacity
-            style={styles.patrolNotificationButtonSos}
-            onPress={triggerEmergencySOS}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.patrolNotificationButtonSosText}>
-              DISTRESS SIGNAL
-            </Text>
-          </TouchableOpacity> */}
         </View>
       )}
+
+      {/* ======================================================
+          DASHBOARD
+      ====================================================== */}
 
       <DashboardView
         personnel={personnel}
         schedule={schedule}
+        personnelLogs={personnelLogs}
         isShiftActive={patrolStatus.running}
         isGpsEnabled={isGpsEnabled}
         foregroundGranted={foregroundGranted}
@@ -339,7 +470,6 @@ function MainApp({
         onOpenSettings={openSystemSettings}
         onEmergencySOS={triggerEmergencySOS}
         autoSync={autoSync}
-        // onToggleAutoSync={toggleAutoSync}
         is2FAEnabled={is2FAEnabled}
         onEnable2FA={enable2FA}
         onDisable2FA={disable2FA}
@@ -353,6 +483,10 @@ function MainApp({
     </>
   );
 }
+
+// ============================================================
+// ACCOUNT SCREEN WRAPPER
+// ============================================================
 
 function AccountScreenWrapper({
   navigation,
