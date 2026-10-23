@@ -1,29 +1,25 @@
 package com.pnp.geotracker
 
 import com.pnp.geotracker.patrol.PatrolManager
-import com.pnp.geotracker.sync.SyncManager
 import com.pnp.geotracker.PatrolServiceModule
 
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
-import android.util.Log
-import android.app.PendingIntent
-
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 
+import androidx.core.app.NotificationCompat
 
 class PatrolForegroundService : Service() {
+
     private lateinit var patrolManager: PatrolManager
-    private lateinit var syncManager: SyncManager
-    private lateinit var dutyType: String
-    private lateinit var personnelId: String
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -31,47 +27,36 @@ class PatrolForegroundService : Service() {
         const val TAG = "PatrolService"
         const val CHANNEL_ID = "patrol_tracking"
         const val NOTIFICATION_ID = 1001
-        const val ACTION_STOP_PATROL = "com.pnp.geotracker.STOP_PATROL"
-        const val ACTION_OPEN_APP = "com.pnp.geotracker.OPEN_APP"
-    }
 
-    private val syncRunnable = object : Runnable {
-        override fun run() {
+        const val ACTION_STOP_PATROL =
+            "com.pnp.geotracker.STOP_PATROL"
 
-            Thread {
-                try {
-                    syncManager.sync()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }.start()
-
-            handler.postDelayed(this, 30000)
-        }
+        const val ACTION_OPEN_APP =
+            "com.pnp.geotracker.OPEN_APP"
     }
 
     private val notificationChecker = object : Runnable {
         override fun run() {
 
-            val manager =
-                getSystemService(NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val manager =
+                    getSystemService(NotificationManager::class.java)
 
-            val exists =
-                manager.activeNotifications.any {
+                val exists = manager.activeNotifications.any {
                     it.id == NOTIFICATION_ID
                 }
 
-            if (!exists && PatrolManager.isRunning()) {
+                if (!exists && PatrolManager.isRunning()) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        createNotification()
+                    )
 
-                startForeground(
-                    NOTIFICATION_ID,
-                    createNotification()
-                )
-
-                Log.d(TAG, "Foreground notification restored")
+                    Log.d(TAG, "Foreground notification restored")
+                }
             }
 
-            handler.postDelayed(this, 5 * 60 * 1000)
+            handler.postDelayed(this, 5 * 60 * 1000L)
         }
     }
 
@@ -81,7 +66,6 @@ class PatrolForegroundService : Service() {
         createNotificationChannel()
 
         patrolManager = PatrolManager(this)
-        syncManager = SyncManager(this)
 
         handler.post(notificationChecker)
 
@@ -95,61 +79,71 @@ class PatrolForegroundService : Service() {
     ): Int {
 
         when (intent?.action) {
+
             ACTION_STOP_PATROL -> {
                 patrolManager.stopPatrol()
-                PatrolServiceModule.sendEvent(
-                    "PATROL_STOPPED"
-                )
+
+                PatrolServiceModule.sendEvent("PATROL_STOPPED")
+
+                handler.removeCallbacks(notificationChecker)
+
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
+
                 return START_NOT_STICKY
             }
+
             ACTION_OPEN_APP -> {
-                // Continue to normal notification click
+                // Continue normal notification click handling.
             }
         }
 
         Log.d(TAG, "Service started")
-        dutyType = intent?.getStringExtra("dutyType") ?: ""
-        personnelId = intent?.getStringExtra("personnelId") ?: ""
-        Log.d(TAG, "Duty Type: ${dutyType}")
-        Log.d(TAG, "Personnel Id: ${personnelId}")
 
-        patrolManager.startPatrol(
-            dutyType,
-            personnelId
-        )
+        val dutyType =
+            intent?.getStringExtra("dutyType") ?: ""
 
-        handler.post(syncRunnable)
+        val personnelId =
+            intent?.getStringExtra("personnelId") ?: ""
+
+        Log.d(TAG, "Duty Type: $dutyType")
+        Log.d(TAG, "Personnel Id: $personnelId")
 
         val notification = createNotification()
 
         startForeground(
             NOTIFICATION_ID,
             notification
-            // later we'll use the Android 10+ overload with service type when appropriate
         )
 
-        // Initialize FusedLocationProviderClient
-        // Start requesting location updates
+        patrolManager.startPatrol(
+            dutyType,
+            personnelId
+        )
+
+        // Automatic Supabase synchronization has been removed.
+        // GPS tracking and local patrol-location saving remain active.
+        // Synchronization should run only when manually requested.
 
         return START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        handler.removeCallbacks(notificationChecker)
 
         patrolManager.stopPatrol()
-        handler.removeCallbacks(syncRunnable)
-        handler.removeCallbacks(notificationChecker)
+
         stopForeground(STOP_FOREGROUND_REMOVE)
 
-        stopSelf()
+        Log.d(TAG, "Patrol foreground service destroyed")
+
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotification(): Notification {
+
         val openIntent = packageManager
             .getLaunchIntentForPackage(packageName)
 
@@ -168,14 +162,13 @@ class PatrolForegroundService : Service() {
             action = ACTION_STOP_PATROL
         }
 
-        val stopPendingIntent =
-            PendingIntent.getService(
-                this,
-                1,
-                stopIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or
-                    PendingIntent.FLAG_IMMUTABLE
-            )
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
+        )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)

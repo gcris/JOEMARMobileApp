@@ -869,7 +869,6 @@ export const usePatrolState = () => {
         registrationData.badge_number,
         registrationData.rank_id,
         registrationData.unit_id,
-        registrationData.designation,
       );
 
       if (!candidate) {

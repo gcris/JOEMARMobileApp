@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
   StyleSheet,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Personnel, Schedule, PersonnelLog } from "../types";
 import { getStyles, getThemeColors } from "../theme/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -18,6 +18,7 @@ import { ScrollView } from "react-native-gesture-handler";
 import { AccountScreen } from "./AccountScreen";
 import PersonnelLogMapScreen from "./PersonnelLogMapScreen";
 import PatrolSummaryScreen from "./PatrolSummaryScreen";
+import { OnboardingView, OnboardingTourRef } from "./OnboardingView";
 
 const DUTY_TYPES = [
   "Foot Patrolling",
@@ -31,6 +32,7 @@ const DUTY_TYPES = [
   "DODON",
   "Intel-Driven Operation",
   "Special Laws",
+  "Combat/Prophylactic Patrolling"
 ];
 
 interface DashboardViewProps {
@@ -100,6 +102,25 @@ export const DashboardView = ({
     useState<string>("Foot Patrolling");
 
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const headerRef = useRef<any>(null);
+  const patrolTrackerRef = useRef<any>(null);
+  const dutyDropdownWrapperRef = useRef<any>(null);
+  const patrolButtonRef = useRef<any>(null);
+  const syncCardRef = useRef<any>(null);
+  const sosButtonRef = useRef<any>(null);
+  const bottomNavRef = useRef<any>(null);
+
+  const tourRefs = {
+    header: headerRef,
+    patrolTracker: patrolTrackerRef,
+    dutyDropdown: dutyDropdownWrapperRef,
+    patrolButton: patrolButtonRef,
+    syncCard: syncCardRef,
+    sosButton: sosButtonRef,
+    bottomNav: bottomNavRef,
+  };
 
   const theme = {
     background: isDarkTheme ? "#0B121F" : "#F8FAFC",
@@ -121,6 +142,18 @@ export const DashboardView = ({
       setSelectedDutyType(activeDutyType);
     }
   }, [activeDutyType]);
+  
+
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      const seen = await AsyncStorage.getItem("@pnp_onboarding_seen");
+      if (!seen) {
+        setShowOnboarding(true);
+        await AsyncStorage.setItem("@pnp_onboarding_seen", "true");
+      }
+    };
+    checkOnboarding();
+  }, []);
 
   const handlePhoneCall = async (phoneNumber: string) => {
     if (!phoneNumber) return;
@@ -278,7 +311,8 @@ export const DashboardView = ({
               marginBottom: 18,
             }}
           >
-            <View
+              <View
+                ref={headerRef}
               style={{
                 flex: 1,
                 marginLeft: 13,
@@ -316,11 +350,12 @@ export const DashboardView = ({
 
           {activeNav === "home" && (
             <View style={localStyles.mainContent}>
+
               {/* ------------------------------------------------------------ */}
               {/* PERMISSIONS                                                   */}
               {/* ------------------------------------------------------------ */}
 
-              {(!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
+              {!showOnboarding && (!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
                 <PermissionView
                   foregroundGranted={foregroundGranted}
                   backgroundGranted={backgroundGranted}
@@ -338,7 +373,8 @@ export const DashboardView = ({
               {/* PATROL TRACKER                                                */}
               {/* ------------------------------------------------------------ */}
 
-              <View
+                <View
+                  ref={patrolTrackerRef}
                 style={[
                   localStyles.trackerCard,
                   {
@@ -377,7 +413,8 @@ export const DashboardView = ({
                     />
                   </View>
 
-                  <View style={{ flex: 1 }}>
+                    <View 
+                      style={{ flex: 1 }}>
                     <Text
                       style={[
                         localStyles.sectionTitle,
@@ -484,7 +521,7 @@ export const DashboardView = ({
                   PATROL DUTY TYPE
                 </Text>
 
-                <View style={localStyles.dutyDropdownWrapper}>
+                <View ref={dutyDropdownWrapperRef} style={localStyles.dutyDropdownWrapper}>
                   {/* SELECTED DUTY BUTTON */}
 
                   <TouchableOpacity
@@ -640,6 +677,7 @@ export const DashboardView = ({
                 {/* ---------------------------------------------------------- */}
 
                 <TouchableOpacity
+                  ref={patrolButtonRef}
                   style={[
                     localStyles.patrolButton,
                     {
@@ -688,6 +726,7 @@ export const DashboardView = ({
               {/* ============================================================ */}
 
               <View
+                ref={syncCardRef}
                 style={[
                   localStyles.syncCard,
                   {
@@ -1545,11 +1584,23 @@ export const DashboardView = ({
           )}
         </ScrollView>
       )}
+
+      {/* ================================================================ */}
+      {/* ONBOARDING WALKTHROUGH                                           */}
+      {/* ================================================================ */}
+
+      <OnboardingView
+        isDarkTheme={isDarkTheme}
+        visible={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        tourRefs={tourRefs}
+      />
       {/* ================================================================ */}
       {/* BOTTOM NAVIGATION                                                 */}
       {/* ================================================================ */}
 
       <View
+        ref={bottomNavRef}
         style={[
           localStyles.bottomNav,
           {
@@ -1661,6 +1712,7 @@ export const DashboardView = ({
         {/* SOS */}
 
         <TouchableOpacity
+          ref={sosButtonRef}
           onPress={() => {
             onEmergencySOS().then((success) => {
               if (success) {
@@ -1945,6 +1997,15 @@ const localStyles = StyleSheet.create({
 
     zIndex: 100,
     elevation: 10,
+  },
+
+  walkthroughCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 15,
+    marginBottom: 14,
   },
 
   dutyDropdownWrapper: {

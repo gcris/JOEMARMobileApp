@@ -842,7 +842,7 @@ export const LoginView = ({
   /*                           WEB REGISTRATION                                */
   /* ------------------------------------------------------------------------ */
 
-  const WEB_REGISTRATION_URL = "https://ilocosnorteppo.com/register";
+  const WEB_REGISTRATION_URL = "https://project-patrol.ilocosnorteppo.com/register";
 
   const handleWebRegistration = async () => {
     try {

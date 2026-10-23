@@ -96,7 +96,6 @@ export const findCandidatePersonnel = async (
   badgeNumber: string,
   rankId: string,
   unitId: string,
-  designation: string,
 ): Promise<Personnel | null> => {
   try {
     const { data, error } = await supabase
@@ -105,10 +104,7 @@ export const findCandidatePersonnel = async (
       .eq("badge_number", badgeNumber.toUpperCase())
       .eq("rank_id", rankId)
       .eq("unit_id", unitId)
-      .ilike("designation", `%${designation}%`)
       .single();
-
-    console.log(badgeNumber, rankId, unitId, designation);
 
     if (error && error.code !== "PGRST116") {
       throw error;
@@ -464,7 +460,7 @@ export const getPatrolLogs = async (
 
     // Start of yesterday
     const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 10);
 
     // Start of tomorrow
     const tomorrowStart = new Date(todayStart);
