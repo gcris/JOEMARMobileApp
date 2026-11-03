@@ -1,1156 +1,2698 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { supabase, Calendar, Unit, Sector } from "../lib/supabase";
-import { useAuth } from "../components/AuthProvider";
+import React, { useEffect, useState, useRef } from "react";
 import {
-  CalendarDays,
-  Clock,
-  Users,
-  Car,
-  Bike,
-  Ship,
-  Shield,
-  Footprints,
-  Radio,
-  CheckCircle2,
-  Building2,
-  RefreshCw,
-  Truck,
-  LayoutDashboard,
-  Check,
-  Motorbike,
-  Star,
-  Drone,
-  MountainIcon,
-} from "lucide-react";
-import { format, startOfDay, endOfDay } from "date-fns";
-import { Link } from "react-router-dom";
-import { FaMotorcycle, FaRegListAlt, FaUserSecret } from "react-icons/fa";
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Linking,
+  StyleSheet,
+} from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Personnel, Schedule, PersonnelLog } from "../types";
+import { getStyles, getThemeColors } from "../theme/styles";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import FontAwesome from "@expo/vector-icons/FontAwesome6";
+import { PermissionView } from "../helper/PermissionView";
+import { ScrollView } from "react-native-gesture-handler";
+import { AccountScreen } from "./AccountScreen";
+import PersonnelLogMapScreen from "./PersonnelLogMapScreen";
+import { PatrolMap } from "./PatrolMap/PatrolMap";
+import PatrolSummaryScreen from "./PatrolSummaryScreen";
+import { OnboardingView, OnboardingTourRef } from "./OnboardingView";
 
-/*
-|--------------------------------------------------------------------------
-| TYPES
-|--------------------------------------------------------------------------
-*/
+const DUTY_TYPES = [
+  "Foot Patrolling",
+  "Mobile Patrolling",
+  "TMRU Patrolling",
+  "Bike Patrolling",
+  "Seaborne Patrolling",
+  "Checkpoint",
+  "Special Event",
+  "Simulation Exercise",
+  "DODON",
+  "Intel-Driven Operation",
+  "Special Laws",
+  "Combat/Prophylactic Patrolling"
+];
 
-type ScheduleAssignment = {
-  personnel?: {
-    id?: string;
-    fullname?: string;
-    rank?: {
-      id?: string;
-      rank_name?: string;
-      level?: number;
+interface DashboardViewProps {
+  personnel: Personnel | null;
+  schedule: Schedule[] | null;
+  personnelLogs: PersonnelLog[];
+  isShiftActive: boolean;
+  isGpsEnabled: boolean;
+  unsyncedCount: number;
+  isSyncing: boolean;
+  isPatrolStarting: boolean;
+  onToggleShift: () => void;
+  onSync: () => void;
+  onOpenSettings: () => void;
+  onEmergencySOS: () => Promise<boolean>;
+
+  autoSync: boolean;
+  is2FAEnabled: boolean;
+  onEnable2FA: (
+    secret: string,
+    code: string,
+    factorId?: string,
+  ) => Promise<boolean>;
+  onDisable2FA: () => Promise<void>;
+
+  setActiveDutyType: (value: string) => void;
+
+  isDarkTheme: boolean;
+  foregroundGranted: boolean | null;
+  backgroundGranted: boolean | null;
+  onRequestForeground: () => Promise<boolean>;
+  onRequestBackground: () => Promise<boolean>;
+  onEnableGpsInline: () => Promise<boolean>;
+  activeDutyType: string;
+}
+
+export const DashboardView = ({
+  personnel,
+  schedule,
+  personnelLogs,
+  isShiftActive,
+  isGpsEnabled,
+  unsyncedCount,
+  isSyncing,
+  isPatrolStarting,
+  onToggleShift,
+  onSync,
+  onOpenSettings,
+  onEmergencySOS,
+  isDarkTheme,
+  foregroundGranted,
+  backgroundGranted,
+  onRequestForeground,
+  onRequestBackground,
+  onEnableGpsInline,
+  setActiveDutyType,
+  activeDutyType,
+}: DashboardViewProps) => {
+  const themeStyles = getStyles(isDarkTheme);
+  const colors = getThemeColors(isDarkTheme);
+
+  const [activeNav, setActiveNav] = useState<
+    "home" | "sos" | "account" | "recent_logs" | "patrol_summary"
+  >("home");
+
+  const [selectedDutyType, setSelectedDutyType] =
+    useState<string>(activeDutyType || "Foot Patrolling");
+
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const headerRef = useRef<any>(null);
+  const patrolTrackerRef = useRef<any>(null);
+  const dutyDropdownWrapperRef = useRef<any>(null);
+  const patrolButtonRef = useRef<any>(null);
+  const syncCardRef = useRef<any>(null);
+  const sosButtonRef = useRef<any>(null);
+  const bottomNavRef = useRef<any>(null);
+
+  const tourRefs = {
+    header: headerRef,
+    patrolTracker: patrolTrackerRef,
+    dutyDropdown: dutyDropdownWrapperRef,
+    patrolButton: patrolButtonRef,
+    syncCard: syncCardRef,
+    sosButton: sosButtonRef,
+    bottomNav: bottomNavRef,
+  };
+
+  const theme = {
+    background: isDarkTheme ? "#0B121F" : "#F8FAFC",
+    card: isDarkTheme ? "#142035" : "#FFFFFF",
+    cardSecondary: isDarkTheme ? "#1E293B" : "#F1F5F9",
+    input: isDarkTheme ? "#0F172A" : "#F8FAFC",
+    border: isDarkTheme ? "#263449" : "#E2E8F0",
+    text: isDarkTheme ? "#F8FAFC" : "#0F172A",
+    secondary: isDarkTheme ? "#94A3B8" : "#64748B",
+    muted: isDarkTheme ? "#64748B" : "#94A3B8",
+    primary: isDarkTheme ? "#FACC15" : "#1E3A8A",
+    primaryText: isDarkTheme ? "#0B121F" : "#FFFFFF",
+    success: "#10B981",
+    danger: "#EF4444",
+  };
+
+  useEffect(() => {
+    if (activeDutyType) {
+      setSelectedDutyType(activeDutyType);
+    }
+  }, [activeDutyType]);
+  
+
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      const seen = await AsyncStorage.getItem("@pnp_onboarding_seen");
+      if (!seen) {
+        setShowOnboarding(true);
+        await AsyncStorage.setItem("@pnp_onboarding_seen", "true");
+      }
     };
-  };
-};
+    checkOnboarding();
+  }, []);
 
-type PatrolSchedule = {
-  id: string;
-  unit?: {
-    id?: string;
-    unit_name?: string;
-  };
-  sector_id?: string;
-  patrol_type?: string;
-  time_from?: string;
-  time_to?: string;
-  schedule_assignments?: ScheduleAssignment[];
-  sector?: Sector;
-};
+  const handlePhoneCall = async (phoneNumber: string) => {
+    if (!phoneNumber) return;
 
-type PatrolStat = {
-  scheduled: number;
-  personnel: number;
-};
+    const url = `tel:${phoneNumber.replace(/\s+/g, "")}`;
 
-type DashboardData = {
-  totalStrength: number;
-  activePersonnel: number;
-  ineffectivePersonnel: number;
-  offDutyPersonnel: number;
-  onPatrolDutyPersonnel: number;
-  onOfficeDutyPersonnel: number;
+    try {
+      const supported = await Linking.canOpenURL(url);
 
-  mobilePatrolling: PatrolStat;
-  tmruPatrolling: PatrolStat;
-  footPatrolling: PatrolStat;
-  bikePatrolling: PatrolStat;
-  checkpoint: PatrolStat;
-  seabornePatrolling: PatrolStat;
-  simex: PatrolStat;
-  specialEvent: PatrolStat;
-  dodon: PatrolStat;
-  intelDrivenOperation: PatrolStat;
-  specialLaws: PatrolStat;
-  prophylactic: PatrolStat;
-
-  totalVehicles: number;
-  mobilePatrolVehicles: number;
-  motorcycleVehicles: number;
-  bikeVehicles: number;
-  atvVehicles: number;
-  rescueBoatVehicles: number;
-  truckVehicles: number;
-
-  schedules: PatrolSchedule[];
-};
-
-/* Shape returned by the dashboard_summary Postgres function */
-type DashboardSummary = {
-  personnel: {
-    total_strength: number;
-    active: number;
-    ineffective: number;
-  };
-  vehicles: {
-    total: number;
-    mobile_patrol: number;
-    motorcycle: number;
-    bike: number;
-    atv: number;
-    rescue_boat: number;
-    truck: number;
-  };
-  patrols: Record<string, PatrolStat>;
-};
-
-const emptyStat: PatrolStat = { scheduled: 0, personnel: 0 };
-
-const initialData: DashboardData = {
-  totalStrength: 0,
-  activePersonnel: 0,
-  ineffectivePersonnel: 0,
-  offDutyPersonnel: 0,
-  onPatrolDutyPersonnel: 0,
-  onOfficeDutyPersonnel: 0,
-
-  mobilePatrolling: emptyStat,
-  tmruPatrolling: emptyStat,
-  footPatrolling: emptyStat,
-  bikePatrolling: emptyStat,
-  checkpoint: emptyStat,
-  seabornePatrolling: emptyStat,
-  simex: emptyStat,
-  specialEvent: emptyStat,
-  dodon: emptyStat,
-  intelDrivenOperation: emptyStat,
-  specialLaws: emptyStat,
-  prophylactic: emptyStat,
-
-  totalVehicles: 0,
-  mobilePatrolVehicles: 0,
-  motorcycleVehicles: 0,
-  bikeVehicles: 0,
-  atvVehicles: 0,
-  rescueBoatVehicles: 0,
-  truckVehicles: 0,
-
-  schedules: [],
-};
-
-/*
-|--------------------------------------------------------------------------
-| DASHBOARD PAGE
-|--------------------------------------------------------------------------
-*/
-
-export default function DashboardPage() {
-  const { unitId, isAdmin } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [unitName, setUnitName] = useState("");
-  const [data, setData] = useState<DashboardData>(initialData);
-  const [calendarEvents, setCalendarEvents] = useState<Calendar[]>([]);
-  const [selectedUnit, setSelectedUnit] = useState("all");
-  const [units, setUnits] = useState<Unit[]>([]);
-
-  /*
-  |--------------------------------------------------------------------------
-  | FETCH DASHBOARD DATA
-  |
-  | All counts come from ONE RPC call (dashboard_summary).
-  | Only the 6 schedules that are displayed are fetched as rows.
-  |--------------------------------------------------------------------------
-  */
-
-  const fetchDashboardData = useCallback(
-    async (isRefresh = false) => {
-      if (isRefresh) {
-        setRefreshing(true);
+      if (supported) {
+        await Linking.openURL(url);
       } else {
-        setLoading(true);
+        Alert.alert(
+          "Unable to Make Call",
+          "Phone calls are not supported on this device.",
+        );
       }
-
-      try {
-        const today = new Date();
-        const todayDate = format(today, "yyyy-MM-dd");
-
-        // Non-admins are always locked to their own unit.
-        const filterUnitId: string | null = !isAdmin
-          ? unitId || null
-          : selectedUnit !== "all"
-            ? selectedUnit
-            : null;
-
-        let schedulesQuery = supabase
-          .from("patrol_schedule")
-          .select(
-            `
-            id,
-            date,
-            sector_id,
-            patrol_type,
-            time_from,
-            time_to,
-            unit_id,
-            mobility_id,
-            location,
-            sector (
-              id,
-              deployment,
-              sector,
-              unit_id
-            ),
-            unit:unit_id (
-              id,
-              unit_name
-            ),
-            schedule_assignments (
-              id,
-              schedule_id,
-              personnel_id,
-              personnel (
-                id,
-                fullname,
-                rank (
-                  id,
-                  rank_name,
-                  level
-                )
-              )
-            )
-          `,
-          )
-          .eq("date", todayDate)
-          .order("time_from", { ascending: true })
-          .limit(6);
-
-        let calendarQuery = supabase
-          .from("calendar")
-          .select(
-            `
-            *,
-            unit:unit_id(
-              unit_name
-            )
-          `,
-          )
-          .lte("start_date", endOfDay(today).toISOString())
-          .gte("end_date", startOfDay(today).toISOString())
-          .order("start_date", { ascending: true });
-
-        if (filterUnitId) {
-          schedulesQuery = schedulesQuery.eq("unit_id", filterUnitId);
-          calendarQuery = calendarQuery.eq("unit_id", filterUnitId);
-        }
-
-        const unitNameQuery =
-          !isAdmin && unitId
-            ? supabase
-                .from("unit")
-                .select("unit_name")
-                .eq("id", unitId)
-                .single()
-            : Promise.resolve({ data: null, error: null });
-
-        const [summaryRes, schedulesRes, calendarRes, unitRes] =
-          await Promise.all([
-            supabase.rpc("dashboard_summary", {
-              p_unit_id: filterUnitId,
-              p_date: todayDate,
-            }),
-            schedulesQuery,
-            calendarQuery,
-            unitNameQuery,
-          ]);
-
-        if (summaryRes.error) throw summaryRes.error;
-        if (schedulesRes.error) throw schedulesRes.error;
-        if (calendarRes.error) throw calendarRes.error;
-        if (unitRes.error) {
-          console.error("Error fetching unit:", unitRes.error);
-        }
-
-        setUnitName(
-          !isAdmin && unitId
-            ? ((unitRes.data as { unit_name?: string } | null)?.unit_name ?? "")
-            : "Provincial Headquarters",
-        );
-
-        const summary = summaryRes.data as DashboardSummary;
-        const patrols = summary.patrols ?? {};
-
-        const stat = (type: string): PatrolStat => ({
-          scheduled: patrols[type]?.scheduled ?? 0,
-          personnel: patrols[type]?.personnel ?? 0,
-        });
-
-        /*
-        | Duty counts
-        */
-
-        const onOfficeDutyPersonnel =
-          patrols["Remain in Office"]?.personnel ?? 0;
-
-        const onPatrolDutyPersonnel = Object.entries(patrols)
-          .filter(([type]) => type !== "Remain in Office")
-          .reduce((total, [, value]) => total + value.personnel, 0);
-
-        const activePersonnel = summary.personnel.active;
-
-        // Never allow the dashboard to show a negative number.
-        const offDutyPersonnel = Math.max(
-          0,
-          activePersonnel - onPatrolDutyPersonnel - onOfficeDutyPersonnel,
-        );
-
-        /*
-        | Schedule rows (displayed list)
-        */
-
-        const schedules: PatrolSchedule[] = (schedulesRes.data ?? []).map(
-          (schedule) => ({
-            ...schedule,
-
-            sector: Array.isArray(schedule.sector)
-              ? (schedule.sector[0] ?? undefined)
-              : (schedule.sector ?? undefined),
-
-            unit: Array.isArray(schedule.unit)
-              ? (schedule.unit[0] ?? undefined)
-              : (schedule.unit ?? undefined),
-
-            schedule_assignments: (schedule.schedule_assignments ?? []).map(
-              (assignment) => ({
-                ...assignment,
-
-                personnel: Array.isArray(assignment.personnel)
-                  ? (assignment.personnel[0] ?? undefined)
-                  : (assignment.personnel ?? undefined),
-              }),
-            ),
-          }),
-        );
-
-        setData({
-          totalStrength: summary.personnel.total_strength,
-          activePersonnel,
-          ineffectivePersonnel: summary.personnel.ineffective,
-          offDutyPersonnel,
-
-          onPatrolDutyPersonnel,
-          onOfficeDutyPersonnel,
-
-          mobilePatrolling: stat("Mobile Patrolling"),
-          tmruPatrolling: stat("TMRU Patrolling"),
-          footPatrolling: stat("Foot Patrolling"),
-          bikePatrolling: stat("Bike Patrolling"),
-          checkpoint: stat("Checkpoint"),
-          seabornePatrolling: stat("Seaborne Patrolling"),
-          simex: stat("Simulation Exercise"),
-          specialEvent: stat("Special Event"),
-          dodon: stat("Dodon"),
-          intelDrivenOperation: stat("Intel-Driven Operation"),
-          specialLaws: stat("Special Laws"),
-          prophylactic: stat("Combat/Prophylactic Patrolling"),
-
-          totalVehicles: summary.vehicles.total,
-          mobilePatrolVehicles: summary.vehicles.mobile_patrol,
-          motorcycleVehicles: summary.vehicles.motorcycle,
-          bikeVehicles: summary.vehicles.bike,
-          atvVehicles: summary.vehicles.atv,
-          rescueBoatVehicles: summary.vehicles.rescue_boat,
-          truckVehicles: summary.vehicles.truck,
-
-          schedules,
-        });
-
-        setCalendarEvents((calendarRes.data as Calendar[]) ?? []);
-      } catch (error) {
-        console.error("Error fetching dashboard data:", error);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [isAdmin, unitId, selectedUnit],
-  );
-
-  /*
-  |--------------------------------------------------------------------------
-  | LOAD UNITS (ONCE, ADMIN ONLY)
-  |--------------------------------------------------------------------------
-  */
-
-  useEffect(() => {
-    if (!isAdmin) return;
-
-    supabase
-      .from("unit")
-      .select("*")
-      .order("level", { ascending: false })
-      .order("unit_name", { ascending: true })
-      .then(({ data, error }) => {
-        if (!error && data) {
-          setUnits(data);
-        }
-      });
-  }, [isAdmin]);
-
-  /*
-  |--------------------------------------------------------------------------
-  | LOAD DASHBOARD
-  |--------------------------------------------------------------------------
-  */
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
-
-  /*
-  |--------------------------------------------------------------------------
-  | LOADING SCREEN
-  |--------------------------------------------------------------------------
-  */
-
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
-
-          <p className="font-medium text-slate-500">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | DASHBOARD
-  |--------------------------------------------------------------------------
-  */
-
-  return (
-    <div className="space-y-8 pb-8">
-      {/* =========================================================
-          HEADER
-      ========================================================= */}
-
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="relative shrink-0">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20">
-              <LayoutDashboard className="w-7 h-7" />
-            </div>
-
-            <div className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 border-2 border-white dark:border-slate-950">
-              <Check className="w-3 h-3 text-white" />
-            </div>
-          </div>
-
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-              {unitName || "Dashboard"}
-            </h1>
-
-            <p className="mt-0.5 text-slate-500 dark:text-slate-400">
-              Daily operational overview and situational awareness
-            </p>
-          </div>
-        </div>
-
-        {isAdmin && (
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <select
-              value={selectedUnit}
-              onChange={(e) => setSelectedUnit(e.target.value)}
-              className="border border-slate-400 dark:border-slate-600 rounded-xl px-4 py-2.5 font-bold bg-slate-50 text-slate-900 dark:bg-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500/20 outline-none"
-            >
-              <option value="all">All Units/Stations</option>
-
-              {units.map((unit) => (
-                <option key={unit.id} value={unit.id}>
-                  {unit.unit_name}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={() => fetchDashboardData(true)}
-              disabled={refreshing}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              <RefreshCw
-                className={`h-5 w-5 ${refreshing ? "animate-spin" : ""}`}
-              />
-              Refresh
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* =========================================================
-          DATE / TIME
-      ========================================================= */}
-
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <Clock className="h-5 w-5 text-blue-600" />
-
-        <span className="font-semibold text-slate-700 dark:text-slate-200">
-          {format(new Date(), "EEEE, MMMM dd, yyyy")}
-        </span>
-
-        <span className="text-slate-300 dark:text-slate-700">•</span>
-
-        <span className="font-black text-slate-900 dark:text-white">
-          {format(new Date(), "HH:mm")}
-        </span>
-      </div>
-
-      {/* =========================================================
-          PERSONNEL
-      ========================================================= */}
-
-      <DashboardSection
-        icon={Users}
-        title="Personnel Strength"
-        description="Current personnel availability and deployment"
-      >
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard
-            label="Total Strength"
-            value={data.totalStrength}
-            icon={Users}
-            accent="blue"
-            to="/personnel"
-          />
-
-          <StatCard
-            label="Actual Present"
-            value={data.activePersonnel}
-            icon={CheckCircle2}
-            accent="emerald"
-            to="/personnel?filter=actual-present"
-          />
-
-          <StatCard
-            label="Office Duty"
-            value={data.onOfficeDutyPersonnel}
-            icon={Building2}
-            accent="indigo"
-            to="/personnel?filter=office-duty"
-          />
-
-          <StatCard
-            label="Patrol Duty"
-            value={data.onPatrolDutyPersonnel}
-            icon={Shield}
-            accent="amber"
-            to="/personnel?filter=patrol-duty"
-          />
-
-          <StatCard
-            label="Off Duty"
-            value={data.offDutyPersonnel}
-            icon={Clock}
-            accent="slate"
-            to="/personnel?filter=off-duty"
-          />
-
-          <StatCard
-            label="Ineffective"
-            value={data.ineffectivePersonnel}
-            icon={Radio}
-            accent="red"
-            to="/personnel?filter=ineffective"
-          />
-        </div>
-      </DashboardSection>
-
-      {/* =========================================================
-          MOBILITY ASSETS
-      ========================================================= */}
-
-      <DashboardSection
-        icon={Car}
-        title="Mobility Assets"
-        description="Available mobility assets assigned to the unit/station"
-      >
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">
-          <StatCard
-            label="Total Mobility"
-            value={data.totalVehicles}
-            icon={FaRegListAlt}
-            accent="slate"
-            to="/mobility-assets?filter=all"
-          />
-
-          <StatCard
-            label="Mobile Patrolling"
-            value={data.mobilePatrolVehicles}
-            icon={Car}
-            accent="blue"
-            to="/mobility-assets?filter=mobile-patrol"
-          />
-
-          <StatCard
-            label="Motorcycle"
-            value={data.motorcycleVehicles}
-            icon={FaMotorcycle}
-            accent="indigo"
-            to="/mobility-assets?filter=motorcycle"
-          />
-
-          <StatCard
-            label="Bike"
-            value={data.bikeVehicles}
-            icon={Bike}
-            accent="emerald"
-            to="/mobility-assets?filter=bike"
-          />
-
-          <StatCard
-            label="ATV"
-            value={data.atvVehicles}
-            icon={Car}
-            accent="amber"
-            to="/mobility-assets?filter=atv"
-          />
-
-          <StatCard
-            label="Rescue Boat"
-            value={data.rescueBoatVehicles}
-            icon={Ship}
-            accent="cyan"
-            to="/mobility-assets?filter=rescue-boat"
-          />
-
-          <StatCard
-            label="Truck"
-            value={data.truckVehicles}
-            icon={Truck}
-            accent="slate"
-            to="/mobility-assets?filter=truck"
-          />
-        </div>
-      </DashboardSection>
-
-      {/* =========================================================
-          PATROL STATISTICS
-      ========================================================= */}
-
-      <DashboardSection
-        icon={Shield}
-        title="Today's Patrolling Statistics"
-        description="Personnel scheduled for today's operations"
-      >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-          <PatrolCard
-            label="Foot Patrolling"
-            personnel={data.footPatrolling.personnel}
-            scheduled={data.footPatrolling.scheduled}
-            icon={Footprints}
-          />
-
-          <PatrolCard
-            label="Mobile Patrolling"
-            personnel={data.mobilePatrolling.personnel}
-            scheduled={data.mobilePatrolling.scheduled}
-            icon={Car}
-          />
-
-          <PatrolCard
-            label="TMRU Patrolling"
-            personnel={data.tmruPatrolling.personnel}
-            scheduled={data.tmruPatrolling.scheduled}
-            icon={Motorbike}
-          />
-
-          <PatrolCard
-            label="Bike Patrolling"
-            personnel={data.bikePatrolling.personnel}
-            scheduled={data.bikePatrolling.scheduled}
-            icon={Bike}
-          />
-
-          <PatrolCard
-            label="Seaborne"
-            personnel={data.seabornePatrolling.personnel}
-            scheduled={data.seabornePatrolling.scheduled}
-            icon={Ship}
-          />
-
-          <PatrolCard
-            label="Checkpoint"
-            personnel={data.checkpoint.personnel}
-            scheduled={data.checkpoint.scheduled}
-            icon={Shield}
-          />
-
-          <PatrolCard
-            label="Special Events"
-            personnel={data.specialEvent.personnel}
-            scheduled={data.specialEvent.scheduled}
-            icon={Star}
-          />
-
-          <PatrolCard
-            label="SIMEX"
-            personnel={data.simex.personnel}
-            scheduled={data.simex.scheduled}
-            icon={Radio}
-          />
-
-          <PatrolCard
-            label="DODON"
-            personnel={data.dodon.personnel}
-            scheduled={data.dodon.scheduled}
-            icon={Drone}
-          />
-
-          <PatrolCard
-            label="Intel-Driven Operation"
-            personnel={data.intelDrivenOperation.personnel}
-            scheduled={data.intelDrivenOperation.scheduled}
-            icon={FaUserSecret}
-          />
-
-          <PatrolCard
-            label="Special Laws"
-            personnel={data.specialLaws.personnel}
-            scheduled={data.specialLaws.scheduled}
-            icon={CheckCircle2}
-          />
-
-          <PatrolCard
-            label="Combat/Prophylactic Patrolling"
-            personnel={data.prophylactic.personnel}
-            scheduled={data.prophylactic.scheduled}
-            icon={MountainIcon}
-          />
-        </div>
-      </DashboardSection>
-
-      {/* =========================================================
-          CALENDAR + PATROL SCHEDULE
-      ========================================================= */}
-
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <DashboardPanel
-          title="Calendar Events / Activities"
-          icon={CalendarDays}
-        >
-          {calendarEvents.length > 0 ? (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {calendarEvents.map((event) => (
-                <CalendarEvent key={event.id} event={event} />
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="No calendar events for today." />
-          )}
-        </DashboardPanel>
-
-        <div className="xl:col-span-2">
-          <DashboardPanel
-            title="Today's Patrol Schedule"
-            icon={Clock}
-            action={
-              <Link
-                to="/schedule"
-                className="text-blue-600 hover:text-blue-700"
-              >
-                View Full Schedule
-              </Link>
-            }
-          >
-            {data.schedules.length > 0 ? (
-              <div className="space-y-3">
-                {data.schedules.map((schedule) => (
-                  <ScheduleItem key={schedule.id} schedule={schedule} />
-                ))}
-              </div>
-            ) : (
-              <EmptyState text="No patrol assignments for today." />
-            )}
-          </DashboardPanel>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| DASHBOARD SECTION
-|--------------------------------------------------------------------------
-*/
-
-function DashboardSection({
-  icon: Icon,
-  title,
-  description,
-  children,
-}: {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <div className="mb-4 flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/40">
-          <Icon className="h-5 w-5" />
-        </div>
-
-        <div>
-          <h2 className="text-lg font-black text-slate-900 dark:text-white">
-            {title}
-          </h2>
-
-          <p className="text-slate-500 dark:text-slate-400">{description}</p>
-        </div>
-      </div>
-
-      {children}
-    </section>
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| STAT CARD
-|--------------------------------------------------------------------------
-*/
-
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  accent = "blue",
-  to,
-}: {
-  label: string;
-  value: number;
-  icon: React.ElementType;
-  accent?: "blue" | "emerald" | "indigo" | "amber" | "slate" | "red" | "cyan";
-  to?: string;
-}) {
-  const accents = {
-    blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400",
-    emerald:
-      "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400",
-    indigo:
-      "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400",
-    amber:
-      "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400",
-    slate: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-    red: "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400",
-    cyan: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-400",
+    } catch (error) {
+      console.error("Phone linking error:", error);
+    }
   };
 
-  const body = (
-    <>
-      {to && (
-        <div
-          className="
-            absolute inset-x-0 top-0 h-1
-            bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500
-            transition-all duration-300
-            group-hover:h-1.5
-          "
-        />
+  const handleViberCall = async (viberNumber: string) => {
+    if (!viberNumber) return;
+
+    const cleanNumber = viberNumber.replace(/[\s+]+/g, "");
+    const url = `viber://contact?number=%2B${cleanNumber}`;
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+
+      if (supported) {
+        await Linking.openURL(url);
+        return;
+      }
+
+      Alert.alert(
+        "Viber Not Found",
+        "Viber does not appear to be installed on this device.",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "OK",
+          },
+        ],
+      );
+    } catch (error) {
+      console.error("Viber linking error:", error);
+    }
+  };
+
+  const confirmPatrolToggle = async () => {
+    const action = isShiftActive ? "stop" : "start";
+
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        `${action === "start" ? "Start" : "Stop"} Patrol`,
+        isShiftActive
+          ? "Are you sure you want to stop the current patrol?"
+          : `Start ${selectedDutyType} and begin recording your patrol location?`,
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: action === "start" ? "Start Patrol" : "Stop Patrol",
+            style: action === "stop" ? "destructive" : "default",
+            onPress: () => resolve(true),
+          },
+        ],
+      );
+    });
+
+    if (confirmed) {
+      onToggleShift();
+    }
+  };
+
+  const getScheduleDate = (item: Schedule) => {
+    const possibleDate =
+      (item as any).date ||
+      (item as any).scheduled_date ||
+      (item as any).schedule_date;
+
+    if (possibleDate) {
+      try {
+        return new Date(possibleDate).toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+      } catch {
+        return possibleDate;
+      }
+    }
+
+    return new Date().toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  return (
+    <View
+      style={[
+        localStyles.root,
+        {
+          backgroundColor: isDarkTheme ? "#080F1C" : "#F1F5F9",
+        },
+      ]}
+    >
+      {/* ================================================================ */}
+      {/* MAIN CONTENT                                                     */}
+      {/* ================================================================ */}
+
+      {activeNav === "recent_logs" ? (
+        <View style={localStyles.recentLogsContainer}>
+          <PatrolMap logs={personnelLogs} isDarkTheme={isDarkTheme} />
+        </View>
+      ) : (
+        <ScrollView
+          style={[
+            themeStyles.container,
+            {
+              zIndex: 1,
+            },
+          ]}
+          contentContainerStyle={[
+            localStyles.scrollContent,
+            {
+              paddingBottom: 105,
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ================================================================ */}
+          {/* HEADER */}
+          {/* ================================================================ */}
+
+          <View
+            ref={headerRef}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 18,
+            }}
+          >
+            <View
+              style={{
+                flex: 1,
+                marginLeft: 13,
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.5}
+                style={{
+                  fontSize: 23,
+                  fontWeight: "800",
+                  color: theme.text,
+                }}
+              >
+                Welcome, {personnel?.rank?.rank_name} {personnel?.fullname}!
+              </Text>
+
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontSize: 17,
+                  color: theme.secondary,
+                  marginTop: 2,
+                }}
+              >
+                Dashboard Overview
+              </Text>
+            </View>
+          </View>
+
+          {/* ================================================================ */}
+          {/* HOME                                                              */}
+          {/* ================================================================ */}
+
+          {activeNav === "home" && (
+            <View style={localStyles.mainContent}>
+              {/* ------------------------------------------------------------ */}
+              {/* PERMISSIONS                                                   */}
+              {/* ------------------------------------------------------------ */}
+
+              {!showOnboarding &&
+                (!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
+                  <PermissionView
+                    foregroundGranted={foregroundGranted}
+                    backgroundGranted={backgroundGranted}
+                    isGpsEnabled={isGpsEnabled}
+                    isDarkTheme={isDarkTheme}
+                    onRequestForeground={onRequestForeground}
+                    onRequestBackground={onRequestBackground}
+                    onEnableGpsInline={onEnableGpsInline}
+                    onOpenSettings={onOpenSettings}
+                    gpsLoading={false}
+                  />
+                )}
+
+              {/* ------------------------------------------------------------ */}
+              {/* PATROL TRACKER                                                */}
+              {/* ------------------------------------------------------------ */}
+
+              <View
+                ref={patrolTrackerRef}
+                style={[
+                  localStyles.trackerCard,
+                  {
+                    backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
+                    borderColor: isShiftActive
+                      ? "#22C55E"
+                      : isDarkTheme
+                        ? "#263449"
+                        : "#E2E8F0",
+                  },
+                ]}
+              >
+                <View style={localStyles.sectionHeader}>
+                  <View
+                    style={[
+                      localStyles.sectionIcon,
+                      {
+                        backgroundColor: isShiftActive
+                          ? "rgba(34,197,94,0.12)"
+                          : isDarkTheme
+                            ? "#1E293B"
+                            : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="navigate-outline"
+                      size={22}
+                      color={
+                        isShiftActive
+                          ? "#22C55E"
+                          : isDarkTheme
+                            ? "#FACC15"
+                            : "#1E3A8A"
+                      }
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sectionTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      Patrol Tracker
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sectionSubtitle,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {isShiftActive
+                        ? "Location tracking is currently active."
+                        : "Start a patrol to begin location tracking."}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      localStyles.liveIndicator,
+                      {
+                        backgroundColor: isShiftActive
+                          ? "rgba(34,197,94,0.12)"
+                          : isDarkTheme
+                            ? "#1E293B"
+                            : "#F1F5F9",
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        localStyles.liveDot,
+                        {
+                          backgroundColor: isShiftActive
+                            ? "#22C55E"
+                            : "#64748B",
+                        },
+                      ]}
+                    />
+
+                    <Text
+                      style={[
+                        localStyles.liveText,
+                        {
+                          color: isShiftActive
+                            ? "#22C55E"
+                            : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {isShiftActive ? "LIVE" : "READY"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.trackerNotice,
+                    {
+                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                      borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={18}
+                    color={colors.textSecondary}
+                  />
+
+                  <Text
+                    style={[
+                      localStyles.trackerNoticeText,
+                      {
+                        color: colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    When active, your coordinates are recorded locally and
+                    tracking continues while the screen is minimized.
+                  </Text>
+                </View>
+
+                {/* ---------------------------------------------------------- */}
+                {/* DUTY TYPE                                                    */}
+                {/* ---------------------------------------------------------- */}
+
+                <Text
+                  style={[
+                    localStyles.inputLabel,
+                    {
+                      color: isDarkTheme ? "#CBD5E1" : "#334155",
+                    },
+                  ]}
+                >
+                  PATROL ACTIVITY
+                </Text>
+
+                <View
+                  ref={dutyDropdownWrapperRef}
+                  style={localStyles.dutyDropdownWrapper}
+                >
+                  {/* SELECTED DUTY BUTTON */}
+
+                  <TouchableOpacity
+                    onPress={() => setShowDropdown((previous) => !previous)}
+                    disabled={isShiftActive}
+                    activeOpacity={0.8}
+                    style={[
+                      localStyles.dutySelector,
+                      {
+                        backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                        borderColor: showDropdown
+                          ? isDarkTheme
+                            ? "#FACC15"
+                            : "#1E3A8A"
+                          : isDarkTheme
+                            ? "#334155"
+                            : "#CBD5E1",
+                        opacity: isShiftActive ? 0.55 : 1,
+                      },
+                    ]}
+                  >
+                    <View style={localStyles.dutySelectorLeft}>
+                      <View
+                        style={[
+                          localStyles.dutyIcon,
+                          {
+                            backgroundColor: isDarkTheme
+                              ? "#1E293B"
+                              : "#EFF6FF",
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="walk-outline"
+                          size={19}
+                          color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                        />
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            localStyles.dutySmallText,
+                            {
+                              color: colors.textSecondary,
+                            },
+                          ]}
+                        >
+                          SELECTED ACTIVITY
+                        </Text>
+
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            localStyles.dutyValue,
+                            {
+                              color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                            },
+                          ]}
+                        >
+                          {selectedDutyType}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Ionicons
+                      name={showDropdown ? "chevron-up" : "chevron-down"}
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+
+                  {/* DROPDOWN */}
+
+                  {showDropdown && !isShiftActive && (
+                    <View
+                      style={[
+                        localStyles.dropdownMenu,
+                        {
+                          backgroundColor: isDarkTheme ? "#172235" : "#FFFFFF",
+                          borderColor: isDarkTheme ? "#334155" : "#CBD5E1",
+                        },
+                      ]}
+                    >
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        scrollEnabled={true}
+                        showsVerticalScrollIndicator={true}
+                        keyboardShouldPersistTaps="handled"
+                        bounces={false}
+                        style={localStyles.dropdownScroll}
+                        contentContainerStyle={
+                          localStyles.dropdownScrollContent
+                        }
+                      >
+                        {DUTY_TYPES.map((dutyType) => {
+                          const selected = selectedDutyType === dutyType;
+
+                          return (
+                            <TouchableOpacity
+                              key={dutyType}
+                              onPress={() => {
+                                setSelectedDutyType(dutyType);
+                                setActiveDutyType(dutyType);
+                                setShowDropdown(false);
+                              }}
+                              activeOpacity={0.75}
+                              style={[
+                                localStyles.dropdownItem,
+                                {
+                                  backgroundColor: selected
+                                    ? isDarkTheme
+                                      ? "#263449"
+                                      : "#EFF6FF"
+                                    : "transparent",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  localStyles.dropdownItemText,
+                                  {
+                                    color: selected
+                                      ? isDarkTheme
+                                        ? "#FACC15"
+                                        : "#1E3A8A"
+                                      : isDarkTheme
+                                        ? "#E2E8F0"
+                                        : "#334155",
+                                  },
+                                ]}
+                              >
+                                {dutyType}
+                              </Text>
+
+                              {selected && (
+                                <Ionicons
+                                  name="checkmark"
+                                  size={18}
+                                  color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                                />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+
+                {/* ---------------------------------------------------------- */}
+                {/* START / STOP PATROL                                         */}
+                {/* ---------------------------------------------------------- */}
+
+                <TouchableOpacity
+                  ref={patrolButtonRef}
+                  style={[
+                    localStyles.patrolButton,
+                    {
+                      backgroundColor: isShiftActive ? "#DC2626" : "#16A34A",
+                      opacity: isPatrolStarting ? 0.7 : 1,
+                    },
+                  ]}
+                  disabled={isPatrolStarting}
+                  activeOpacity={0.85}
+                  onPress={confirmPatrolToggle}
+                >
+                  {isPatrolStarting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <View style={localStyles.patrolButtonIcon}>
+                        <Ionicons
+                          name={
+                            isShiftActive
+                              ? "stop-circle-outline"
+                              : "play-circle-outline"
+                          }
+                          size={32}
+                          color="#FFFFFF"
+                        />
+                      </View>
+
+                      <View>
+                        <Text style={localStyles.patrolButtonTitle}>
+                          {isShiftActive ? "STOP PATROL" : "START PATROL"}
+                        </Text>
+
+                        <Text style={localStyles.patrolButtonSubtitle}>
+                          {isShiftActive
+                            ? "End current tracking session"
+                            : `Begin ${selectedDutyType}`}
+                        </Text>
+                      </View>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* ============================================================ */}
+              {/* SYNC CARD                                                     */}
+              {/* ============================================================ */}
+
+              <View
+                ref={syncCardRef}
+                style={[
+                  localStyles.syncCard,
+                  {
+                    backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
+                    borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                  },
+                ]}
+              >
+                <View style={localStyles.sectionHeader}>
+                  <View
+                    style={[
+                      localStyles.sectionIcon,
+                      {
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="cloud-upload-outline"
+                      size={22}
+                      color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sectionTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      Data Synchronization
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sectionSubtitle,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Patrol records waiting to upload
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.syncStatus,
+                    {
+                      backgroundColor:
+                        unsyncedCount > 0
+                          ? isDarkTheme
+                            ? "#291D0A"
+                            : "#FFFBEB"
+                          : isDarkTheme
+                            ? "#10251B"
+                            : "#F0FDF4",
+                      borderColor: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
+                    },
+                  ]}
+                >
+                  <View>
+                    <Text
+                      style={[
+                        localStyles.syncCount,
+                        {
+                          color: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
+                        },
+                      ]}
+                    >
+                      {unsyncedCount}
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.syncCountLabel,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {unsyncedCount === 1 ? "pending log" : "pending logs"}
+                    </Text>
+                  </View>
+
+                  <View style={localStyles.syncStatusRight}>
+                    <Ionicons
+                      name={
+                        unsyncedCount > 0
+                          ? "cloud-upload-outline"
+                          : "cloud-done-outline"
+                      }
+                      size={25}
+                      color={unsyncedCount > 0 ? "#F59E0B" : "#22C55E"}
+                    />
+
+                    <Text
+                      style={[
+                        localStyles.syncStatusText,
+                        {
+                          color: unsyncedCount > 0 ? "#F59E0B" : "#22C55E",
+                        },
+                      ]}
+                    >
+                      {unsyncedCount > 0 ? "WAITING TO SYNC" : "ALL SYNCED"}
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    localStyles.syncButton,
+                    {
+                      backgroundColor:
+                        unsyncedCount > 0
+                          ? isDarkTheme
+                            ? "#FACC15"
+                            : "#1E3A8A"
+                          : isDarkTheme
+                            ? "#1E293B"
+                            : "#F1F5F9",
+                      borderColor: isDarkTheme ? "#334155" : "#E2E8F0",
+                      opacity: isSyncing || unsyncedCount === 0 ? 0.65 : 1,
+                    },
+                  ]}
+                  onPress={onSync}
+                  disabled={isSyncing || unsyncedCount === 0}
+                  activeOpacity={0.8}
+                >
+                  {isSyncing ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={isDarkTheme ? "#0B121F" : "#FFFFFF"}
+                    />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="sync-outline"
+                        size={20}
+                        color={
+                          unsyncedCount > 0
+                            ? isDarkTheme
+                              ? "#0B121F"
+                              : "#FFFFFF"
+                            : colors.textSecondary
+                        }
+                      />
+
+                      <Text
+                        style={[
+                          localStyles.syncButtonText,
+                          {
+                            color:
+                              unsyncedCount > 0
+                                ? isDarkTheme
+                                  ? "#0B121F"
+                                  : "#FFFFFF"
+                                : colors.textSecondary,
+                          },
+                        ]}
+                      >
+                        {unsyncedCount > 0
+                          ? "SYNC PATROL LOGS"
+                          : "NOTHING TO SYNC"}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* ============================================================ */}
+              {/* PATROL SCHEDULE                                               */}
+              {/* ============================================================ */}
+
+              <View
+                style={[
+                  localStyles.scheduleCard,
+                  {
+                    backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
+                    borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                  },
+                ]}
+              >
+                <View style={localStyles.sectionHeader}>
+                  <View
+                    style={[
+                      localStyles.sectionIcon,
+                      {
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={22}
+                      color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sectionTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      Patrol Schedule
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sectionSubtitle,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Your assigned duties and personnel
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      localStyles.scheduleCount,
+                      {
+                        backgroundColor: isDarkTheme ? "#1E293B" : "#EFF6FF",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 18,
+                        fontWeight: "900",
+                        color: isDarkTheme ? "#FACC15" : "#1E3A8A",
+                      }}
+                    >
+                      {schedule?.length || 0}
+                    </Text>
+                  </View>
+                </View>
+
+                {schedule && schedule.length > 0 ? (
+                  <View style={{ marginTop: 4 }}>
+                    {schedule.map((item, index) => (
+                      <View
+                        key={item.id || index}
+                        style={[
+                          localStyles.scheduleItem,
+                          {
+                            backgroundColor: isDarkTheme
+                              ? "#172235"
+                              : "#F8FAFC",
+                            borderColor: isDarkTheme ? "#334155" : "#E2E8F0",
+                          },
+                        ]}
+                      >
+                        {/* Schedule Header */}
+
+                        <View style={localStyles.scheduleItemHeader}>
+                          <View
+                            style={[
+                              localStyles.scheduleNumber,
+                              {
+                                backgroundColor: isDarkTheme
+                                  ? "#263449"
+                                  : "#E0E7FF",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "900",
+                                color: isDarkTheme ? "#FACC15" : "#1E3A8A",
+                              }}
+                            >
+                              {index + 1}
+                            </Text>
+                          </View>
+
+                          <View style={{ flex: 1, marginLeft: 10 }}>
+                            <Text
+                              style={[
+                                localStyles.scheduleDuty,
+                                {
+                                  color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                },
+                              ]}
+                            >
+                              {item.duty_type || "Assigned Duty"}
+                            </Text>
+
+                            <View style={localStyles.scheduleSectorRow}>
+                              <Ionicons
+                                name="location-outline"
+                                size={14}
+                                color={colors.textSecondary}
+                              />
+
+                              <Text
+                                numberOfLines={2}
+                                style={[
+                                  localStyles.scheduleSector,
+                                  {
+                                    color: colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                {item.sector ? (
+                                  <>
+                                    {item.sector.deployment
+                                      ? `${item.sector.deployment} - `
+                                      : ""}
+                                    {item.sector.sector
+                                      ? `Sector ${item.sector.sector}`
+                                      : "Sector"}
+
+                                    {item.sector.sector_details?.length
+                                      ? ` • ${item.sector.sector_details
+                                          .map(
+                                            (detail) => detail.barangay?.name,
+                                          )
+                                          .filter(Boolean)
+                                          .join(", ")}`
+                                      : ""}
+                                  </>
+                                ) : (
+                                  "No sector specified"
+                                )}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Date / Time */}
+
+                        <View
+                          style={[
+                            localStyles.scheduleInfoGrid,
+                            {
+                              borderTopColor: isDarkTheme
+                                ? "#334155"
+                                : "#E2E8F0",
+                              borderBottomColor: isDarkTheme
+                                ? "#334155"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <View style={localStyles.scheduleInfo}>
+                            <Ionicons
+                              name="calendar-outline"
+                              size={17}
+                              color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                            />
+
+                            <View style={{ marginLeft: 8 }}>
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoLabel,
+                                  {
+                                    color: colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                DATE
+                              </Text>
+
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoValue,
+                                  {
+                                    color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                  },
+                                ]}
+                              >
+                                {getScheduleDate(item)}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={localStyles.scheduleInfo}>
+                            <Ionicons
+                              name="time-outline"
+                              size={17}
+                              color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                            />
+
+                            <View style={{ marginLeft: 8 }}>
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoLabel,
+                                  {
+                                    color: colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                DUTY HOURS
+                              </Text>
+
+                              <Text
+                                style={[
+                                  localStyles.scheduleInfoValue,
+                                  {
+                                    color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                  },
+                                ]}
+                              >
+                                {item.timeFrom.slice(0, 5) || "--"} –{" "}
+                                {item.timeTo.slice(0, 5) || "--"}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Personnel */}
+
+                        <View style={{ marginTop: 14 }}>
+                          <View style={localStyles.assignedHeader}>
+                            <Ionicons
+                              name="people-outline"
+                              size={17}
+                              color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
+                            />
+
+                            <Text
+                              style={[
+                                localStyles.assignedHeaderText,
+                                {
+                                  color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                                },
+                              ]}
+                            >
+                              ASSIGNED PERSONNEL
+                            </Text>
+
+                            <View
+                              style={[
+                                localStyles.personnelCount,
+                                {
+                                  backgroundColor: isDarkTheme
+                                    ? "#263449"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 18,
+                                  fontWeight: "900",
+                                  color: colors.textSecondary,
+                                }}
+                              >
+                                {item.personnel?.length || 0}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {item.personnel && item.personnel.length > 0 ? (
+                            <View style={{ marginTop: 9 }}>
+                              {item.personnel.map((pItem, pIndex) => (
+                                <View
+                                  key={pIndex}
+                                  style={[
+                                    localStyles.personnelRow,
+                                    {
+                                      backgroundColor: isDarkTheme
+                                        ? "#0F172A"
+                                        : "#FFFFFF",
+                                      borderColor: isDarkTheme
+                                        ? "#334155"
+                                        : "#E2E8F0",
+                                    },
+                                  ]}
+                                >
+                                  <View
+                                    style={[
+                                      localStyles.personnelAvatar,
+                                      {
+                                        backgroundColor: isDarkTheme
+                                          ? "#263449"
+                                          : "#EFF6FF",
+                                      },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name="person-outline"
+                                      size={19}
+                                      color={
+                                        isDarkTheme ? "#FACC15" : "#1E3A8A"
+                                      }
+                                    />
+                                  </View>
+
+                                  <View
+                                    style={{
+                                      flex: 1,
+                                      marginLeft: 10,
+                                    }}
+                                  >
+                                    <Text
+                                      numberOfLines={2}
+                                      style={[
+                                        localStyles.personnelName,
+                                        {
+                                          color: isDarkTheme
+                                            ? "#F8FAFC"
+                                            : "#0F172A",
+                                        },
+                                      ]}
+                                    >
+                                      {pItem.rank_name || ""}{" "}
+                                      {pItem.fullname || "Unknown"}
+                                    </Text>
+
+                                    <View style={localStyles.personnelActions}>
+                                      <TouchableOpacity
+                                        onPress={() =>
+                                          handlePhoneCall(pItem.phone_number)
+                                        }
+                                        disabled={!pItem.phone_number}
+                                        activeOpacity={0.75}
+                                        style={[
+                                          localStyles.smallContactButton,
+                                          {
+                                            backgroundColor: isDarkTheme
+                                              ? "#172235"
+                                              : "#F1F5F9",
+                                            opacity: pItem.phone_number
+                                              ? 1
+                                              : 0.45,
+                                          },
+                                        ]}
+                                      >
+                                        <Ionicons
+                                          name="call-outline"
+                                          size={15}
+                                          color="#22C55E"
+                                        />
+
+                                        <Text
+                                          numberOfLines={1}
+                                          style={[
+                                            localStyles.smallContactText,
+                                            {
+                                              color: colors.textSecondary,
+                                            },
+                                          ]}
+                                        >
+                                          {pItem.phone_number || "No phone"}
+                                        </Text>
+                                      </TouchableOpacity>
+
+                                      <TouchableOpacity
+                                        onPress={() =>
+                                          handleViberCall(pItem.viber_number)
+                                        }
+                                        disabled={!pItem.viber_number}
+                                        activeOpacity={0.75}
+                                        style={[
+                                          localStyles.smallContactButton,
+                                          {
+                                            backgroundColor: isDarkTheme
+                                              ? "#172235"
+                                              : "#F1F5F9",
+                                            opacity: pItem.viber_number
+                                              ? 1
+                                              : 0.45,
+                                          },
+                                        ]}
+                                      >
+                                        <FontAwesome
+                                          name="viber"
+                                          size={15}
+                                          color="#7360F2"
+                                        />
+
+                                        <Text
+                                          numberOfLines={1}
+                                          style={[
+                                            localStyles.smallContactText,
+                                            {
+                                              color: colors.textSecondary,
+                                            },
+                                          ]}
+                                        >
+                                          {pItem.viber_number || "No Viber"}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  </View>
+                                </View>
+                              ))}
+                            </View>
+                          ) : (
+                            <View
+                              style={[
+                                localStyles.emptyPersonnel,
+                                {
+                                  backgroundColor: isDarkTheme
+                                    ? "#0F172A"
+                                    : "#F8FAFC",
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="people-outline"
+                                size={22}
+                                color={colors.textSecondary}
+                              />
+
+                              <Text
+                                style={{
+                                  marginTop: 6,
+                                  fontSize: 13,
+                                  color: colors.textSecondary,
+                                }}
+                              >
+                                No personnel assigned
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      localStyles.emptySchedule,
+                      {
+                        backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        localStyles.emptyScheduleIcon,
+                        {
+                          backgroundColor: isDarkTheme ? "#1E293B" : "#E2E8F0",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="calendar-clear-outline"
+                        size={30}
+                        color={colors.textSecondary}
+                      />
+                    </View>
+
+                    <Text
+                      style={[
+                        localStyles.emptyScheduleTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      No Active Schedule
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.emptyScheduleText,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      No patrol duty has been assigned to you at this time.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* ================================================================ */}
+          {/* SOS SCREEN                                                        */}
+          {/* ================================================================ */}
+
+          {activeNav === "sos" && (
+            <View style={localStyles.sosContainer}>
+              <View
+                style={[
+                  localStyles.sosCard,
+                  {
+                    backgroundColor: isDarkTheme ? "#241014" : "#FFFFFF",
+                    borderColor: "#EF4444",
+                  },
+                ]}
+              >
+                <View style={localStyles.sosHeader}>
+                  <View
+                    style={[
+                      localStyles.sosIconCircle,
+                      {
+                        backgroundColor: "rgba(239,68,68,0.14)",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="alert-circle" size={48} color="#EF4444" />
+                  </View>
+
+                  <Text
+                    style={[
+                      localStyles.sosTitle,
+                      {
+                        color: "#EF4444",
+                      },
+                    ]}
+                  >
+                    DISTRESS SIGNAL SENT
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.sosWarning,
+                    {
+                      backgroundColor: isDarkTheme ? "#30151A" : "#FEF2F2",
+                      borderColor: "#FCA5A5",
+                    },
+                  ]}
+                >
+                  <Ionicons name="warning-outline" size={21} color="#EF4444" />
+
+                  <Text
+                    style={[
+                      localStyles.sosWarningText,
+                      {
+                        color: isDarkTheme ? "#FECACA" : "#991B1B",
+                      },
+                    ]}
+                  >
+                    Your emergency signal has been sent with your current
+                    location coordinates. Remain in a safe location unless
+                    movement is necessary.
+                  </Text>
+                </View>
+
+                <View style={localStyles.sosStatus}>
+                  <View
+                    style={[
+                      localStyles.sosStatusIcon,
+                      {
+                        backgroundColor: "#DCFCE7",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="checkmark" size={22} color="#16A34A" />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        localStyles.sosStatusTitle,
+                        {
+                          color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                        },
+                      ]}
+                    >
+                      EMERGENCY CONTACTS NOTIFIED
+                    </Text>
+
+                    <Text
+                      style={[
+                        localStyles.sosStatusText,
+                        {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      Your emergency notification has been processed.
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    localStyles.sosContacts,
+                    {
+                      backgroundColor: isDarkTheme ? "#0F172A" : "#F8FAFC",
+                      borderColor: isDarkTheme ? "#263449" : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  {[
+                    "INPPO Operations Center",
+                    "Designated Emergency Contact",
+                    "Unit Commander",
+                  ].map((contact) => (
+                    <View key={contact} style={localStyles.sosContactRow}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color="#22C55E"
+                      />
+
+                      <Text
+                        style={[
+                          localStyles.sosContactText,
+                          {
+                            color: isDarkTheme ? "#CBD5E1" : "#475569",
+                          },
+                        ]}
+                      >
+                        {contact}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={localStyles.returnButton}
+                  activeOpacity={0.85}
+                  onPress={() => setActiveNav("home")}
+                >
+                  <Ionicons
+                    name="arrow-back-outline"
+                    size={20}
+                    color="#FFFFFF"
+                  />
+
+                  <Text style={localStyles.returnButtonText}>
+                    RETURN TO DASHBOARD
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {activeNav === "account" && personnel && (
+            <AccountScreen
+              isDarkTheme={isDarkTheme}
+              personnelId={personnel?.id}
+              onClose={() => setActiveNav("home")}
+            />
+          )}
+
+          {activeNav === "patrol_summary" && (
+            <PatrolSummaryScreen
+              isDarkTheme={isDarkTheme}
+              personnelId={personnel?.id ?? ""}
+              unitId={personnel?.unitId ?? ""}
+              personnelName={personnel?.fullname ?? ""}
+              personnelRank={personnel?.rank?.rank_name ?? ""}
+            />
+          )}
+        </ScrollView>
       )}
 
-      <div className="flex items-center gap-2.5">
-        <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${accents[accent]}`}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
+      {/* ================================================================ */}
+      {/* ONBOARDING WALKTHROUGH                                           */}
+      {/* ================================================================ */}
 
-        <p
-          className="truncate text-sm font-bold text-slate-800 dark:text-slate-200"
-          title={label}
-        >
-          {label}
-        </p>
-      </div>
-
-      <div className="mt-4">
-        <p className="text-center text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-          {value.toLocaleString()}
-        </p>
-      </div>
-    </>
-  );
-
-  const containerClasses = `
-    group relative block w-full overflow-hidden rounded-2xl border p-4 shadow-sm 
-    transition-all duration-300
-    ${
-      to
-        ? "border-sky-200 hover:-translate-y-1 hover:shadow-lg dark:border-sky-800 bg-white dark:bg-slate-900"
-        : "border-slate-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 bg-white dark:bg-slate-900"
-    }
-  `;
-
-  if (to) {
-    return (
-      <Link to={to} className={containerClasses}>
-        {body}
-      </Link>
-    );
-  }
-
-  return <div className={containerClasses}>{body}</div>;
-}
-
-/*
-|--------------------------------------------------------------------------
-| PATROL CARD
-|--------------------------------------------------------------------------
-*/
-
-function PatrolCard({
-  label,
-  personnel,
-  scheduled,
-  icon: Icon,
-}: {
-  label: string;
-  personnel: number;
-  scheduled?: number;
-  icon: React.ElementType;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
-          <Icon className="h-5 w-5" />
-        </div>
-
-        {scheduled !== undefined && (
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-[14px] text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-            {scheduled} SCHED
-          </span>
-        )}
-      </div>
-
-      <p className="mt-4 font-bold text-slate-800 dark:text-slate-200">
-        {label}
-      </p>
-
-      <p className="mt-1 text-3xl font-black text-slate-900 dark:text-white">
-        {personnel.toLocaleString()}
-      </p>
-
-      <p className="mt-1 text-slate-500 dark:text-slate-400">Personnel</p>
-    </div>
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| DASHBOARD PANEL
-|--------------------------------------------------------------------------
-*/
-
-function DashboardPanel({
-  title,
-  icon: Icon,
-  action,
-  children,
-}: {
-  title: string;
-  icon: React.ElementType;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-        <h3 className="flex items-center gap-2 font-black text-slate-900 dark:text-white">
-          <Icon className="h-5 w-5 text-blue-600" />
-
-          {title}
-        </h3>
-
-        {action}
-      </div>
-
-      <div className="p-4">{children}</div>
-    </div>
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| CALENDAR EVENT
-|--------------------------------------------------------------------------
-*/
-
-function CalendarEvent({ event }: { event: Calendar }) {
-  const category = event.category ?? "";
-
-  const categoryColor =
-    category === "Rush/Urgent"
-      ? "bg-red-500"
-      : category === "Priority"
-        ? "bg-orange-500"
-        : category === "Daily Routine"
-          ? "bg-blue-500"
-          : "bg-slate-400";
-
-  return (
-    <div className="relative flex gap-4 px-2 py-4">
-      <div
-        className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${categoryColor}`}
+      <OnboardingView
+        isDarkTheme={isDarkTheme}
+        visible={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        tourRefs={tourRefs}
       />
+      {/* ================================================================ */}
+      {/* BOTTOM NAVIGATION                                                 */}
+      {/* ================================================================ */}
 
-      <div className="min-w-0 flex-1 pl-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate font-bold text-slate-900 dark:text-white">
-              {event.title}
-            </p>
+      <View
+        ref={bottomNavRef}
+        style={[
+          localStyles.bottomNav,
+          {
+            backgroundColor: isDarkTheme ? "#101B2D" : "#FFFFFF",
+            borderTopColor: isDarkTheme ? "#263449" : "#E2E8F0",
+          },
+        ]}
+      >
+        {/* HOME */}
 
-            <p className="mt-1 font-medium text-slate-500">
-              {format(new Date(event.start_date!), "hh:mm a")}
+        <TouchableOpacity
+          onPress={() => setActiveNav("home")}
+          activeOpacity={0.8}
+          style={localStyles.navItem}
+        >
+          <View
+            style={[
+              localStyles.navIconContainer,
+              {
+                backgroundColor:
+                  activeNav === "home"
+                    ? isDarkTheme
+                      ? "#263449"
+                      : "#EFF6FF"
+                    : "transparent",
+              },
+            ]}
+          >
+            <Ionicons
+              name={activeNav === "home" ? "home" : "home-outline"}
+              size={24}
+              color={
+                activeNav === "home"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary
+              }
+            />
+          </View>
 
-              {" – "}
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "home" ? "700" : "500",
+              color:
+                activeNav === "home"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Home
+          </Text>
+        </TouchableOpacity>
 
-              {format(new Date(event.end_date!), "hh:mm a")}
-            </p>
-          </div>
+        {/* RECENT LOGS */}
 
-          {event.unit?.unit_name && (
-            <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              {event.unit.unit_name}
-            </span>
-          )}
-        </div>
+        <TouchableOpacity
+          onPress={() => setActiveNav("recent_logs")}
+          activeOpacity={0.8}
+          style={localStyles.navItem}
+        >
+          <View
+            style={[
+              localStyles.navIconContainer,
+              {
+                backgroundColor:
+                  activeNav === "recent_logs"
+                    ? isDarkTheme
+                      ? "#263449"
+                      : "#EFF6FF"
+                    : "transparent",
+              },
+            ]}
+          >
+            <Ionicons
+              name={activeNav === "recent_logs" ? "time" : "time-outline"}
+              size={24}
+              color={
+                activeNav === "recent_logs"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary
+              }
+            />
+          </View>
 
-        {event.description && (
-          <p className="mt-2 line-clamp-2 text-slate-500 dark:text-slate-400">
-            {event.description}
-          </p>
-        )}
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "recent_logs" ? "700" : "500",
+              color:
+                activeNav === "recent_logs"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Recent Logs
+          </Text>
+        </TouchableOpacity>
 
-        {event.venue && (
-          <p className="mt-2 font-medium text-slate-500">
-            Venue: {event.venue}
-          </p>
-        )}
-      </div>
-    </div>
+        {/* SOS */}
+
+        <TouchableOpacity
+          ref={sosButtonRef}
+          onPress={() => {
+            onEmergencySOS().then((success) => {
+              if (success) {
+                setActiveNav("sos");
+              }
+            });
+          }}
+          activeOpacity={0.85}
+          style={localStyles.sosNavWrapper}
+        >
+          <View style={localStyles.sosNavButton}>
+            <Ionicons name="alert-circle" size={50} color="#FFFFFF" />
+          </View>
+        </TouchableOpacity>
+
+        {/* ACCOUNT */}
+
+        <TouchableOpacity
+          onPress={() => setActiveNav("patrol_summary")}
+          activeOpacity={0.8}
+          style={localStyles.navItem}
+        >
+          <View
+            style={[
+              localStyles.navIconContainer,
+              {
+                backgroundColor:
+                  activeNav === "patrol_summary"
+                    ? isDarkTheme
+                      ? "#263449"
+                      : "#EFF6FF"
+                    : "transparent",
+              },
+            ]}
+          >
+            <Ionicons
+              name={
+                activeNav === "patrol_summary"
+                  ? "document-text"
+                  : "document-text-outline"
+              }
+              size={24}
+              color={
+                activeNav === "patrol_summary"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary
+              }
+            />
+          </View>
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "patrol_summary" ? "700" : "500",
+              color:
+                activeNav === "patrol_summary"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Patrol Summary
+          </Text>
+        </TouchableOpacity>
+
+        {/* ACCOUNT */}
+
+        <TouchableOpacity
+          onPress={() => {
+            if (!personnel) {
+              Alert.alert(
+                "Account Unavailable",
+                "Unable to load account information. Please try again later.",
+              );
+              return;
+            }
+
+            setActiveNav("account");
+          }}
+          activeOpacity={0.8}
+          style={localStyles.navItem}
+        >
+          <View
+            style={[
+              localStyles.navIconContainer,
+              {
+                backgroundColor:
+                  activeNav === "account"
+                    ? isDarkTheme
+                      ? "#263449"
+                      : "#EFF6FF"
+                    : "transparent",
+              },
+            ]}
+          >
+            <Ionicons
+              name={activeNav === "account" ? "person" : "person-outline"}
+              size={24}
+              color={
+                activeNav === "account"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary
+              }
+            />
+          </View>
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: activeNav === "account" ? "700" : "500",
+              color:
+                activeNav === "account"
+                  ? isDarkTheme
+                    ? "#FACC15"
+                    : "#1E3A8A"
+                  : colors.textSecondary,
+            }}
+          >
+            Account
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
-}
+};
 
-/*
-|--------------------------------------------------------------------------
-| SCHEDULE ITEM
-|--------------------------------------------------------------------------
-*/
+/* ========================================================================= */
+/* STYLES                                                                    */
+/* ========================================================================= */
 
-function ScheduleItem({ schedule }: { schedule: PatrolSchedule }) {
-  const assignments = schedule.schedule_assignments ?? [];
+const localStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
 
-  // Sort personnel by rank.level DESC (higher rank first).
-  const personnelNames = [...assignments]
-    .sort((a, b) => {
-      const rankA = a.personnel?.rank?.level ?? -Infinity;
-      const rankB = b.personnel?.rank?.level ?? -Infinity;
+  recentLogsContainer: {
+    flex: 1,
+    width: "100%",
+  },
 
-      return rankB - rankA;
-    })
-    .map((assignment) => {
-      const rank = assignment.personnel?.rank?.rank_name;
-      const fullname = assignment.personnel?.fullname;
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    zIndex: 1,
+  },
 
-      return [rank, fullname].filter(Boolean).join(" ");
-    })
-    .filter(Boolean);
+  mainContent: {
+    width: "100%",
+  },
 
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-black text-blue-600">
-              {schedule.patrol_type}
-            </span>
+  /* --------------------------------------------------------------------- */
+  /* PROFILE                                                               */
+  /* --------------------------------------------------------------------- */
 
-            {schedule.unit?.unit_name && (
-              <span className="font-semibold text-slate-400">
-                • {schedule.unit.unit_name}
-              </span>
-            )}
+  profileCard: {
+    width: "100%",
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
+  },
 
-            {schedule.sector && (
-              <span className="font-semibold text-slate-400">
-                • {schedule.sector?.sector}
-              </span>
-            )}
-          </div>
+  profileTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
 
-          <div className="mt-2 flex items-center gap-2 font-bold text-slate-500">
-            <Clock className="h-3.5 w-3.5" />
+  profilePhoto: {
+    width: 68,
+    height: 68,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
 
-            {schedule.time_from?.slice(0, 5) ?? "--:--"}
+  profileImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
 
-            {" – "}
+  profileInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
 
-            {schedule.time_to?.slice(0, 5) ?? "--:--"}
-          </div>
-        </div>
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginBottom: 4,
+  },
 
-        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 font-black text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
-          <Users className="h-3.5 w-3.5" />
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: 5,
+  },
 
-          {assignments.length}
-        </span>
-      </div>
+  statusPillText: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
 
-      <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-700">
-        {personnelNames.length > 0 ? (
-          <p className="leading-relaxed text-slate-700 dark:text-slate-300">
-            {personnelNames.join(", ")}
-          </p>
-        ) : (
-          <p className="font-medium italic text-slate-400">Unassigned</p>
-        )}
-      </div>
-    </div>
-  );
-}
+  profileName: {
+    fontSize: 20,
+    fontWeight: "900",
+    lineHeight: 24,
+  },
 
-/*
-|--------------------------------------------------------------------------
-| EMPTY STATE
-|--------------------------------------------------------------------------
-*/
+  profileMeta: {
+    fontSize: 17,
+    fontWeight: "600",
+    marginTop: 2,
+  },
 
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
-        <CalendarDays className="h-5 w-5" />
-      </div>
+  headerIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 8,
+  },
 
-      <p className="mt-3 font-medium text-slate-400">{text}</p>
-    </div>
-  );
-}
+  profileDivider: {
+    height: 1,
+    marginVertical: 12,
+  },
+
+  profileDetails: {
+    flexDirection: "row",
+    gap: 12,
+  },
+
+  profileDetailItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  detailLabel: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginBottom: 1,
+  },
+
+  detailValue: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* SHARED CARDS                                                          */
+  /* --------------------------------------------------------------------- */
+
+  trackerCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 17,
+    marginBottom: 14,
+
+    overflow: "visible",
+
+    zIndex: 100,
+    elevation: 10,
+  },
+
+  walkthroughCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 15,
+    marginBottom: 14,
+  },
+
+  dutyDropdownWrapper: {
+    position: "relative",
+
+    zIndex: 1000,
+    elevation: 1000,
+  },
+
+  syncCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 17,
+    marginBottom: 14,
+  },
+
+  scheduleCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 17,
+    marginBottom: 20,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+
+  sectionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 11,
+  },
+
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+
+  sectionSubtitle: {
+    fontSize: 17,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+
+  liveIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 5,
+  },
+
+  liveText: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* TRACKER                                                               */
+  /* --------------------------------------------------------------------- */
+
+  trackerNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 11,
+    marginBottom: 17,
+  },
+
+  trackerNoticeText: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 16,
+    marginLeft: 8,
+  },
+
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 7,
+  },
+
+  dutySelector: {
+    minHeight: 62,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+
+    zIndex: 1001,
+    elevation: 1001,
+  },
+
+  dutySelectorLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+
+  dutyIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+
+  dutySmallText: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+
+  dutyValue: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* DUTY DROPDOWN                                                         */
+  /* --------------------------------------------------------------------- */
+
+  dropdownMenu: {
+    position: "absolute",
+
+    top: 66,
+    left: 0,
+    right: 0,
+
+    height: 280,
+
+    borderRadius: 14,
+    borderWidth: 1,
+
+    zIndex: 9999,
+    elevation: 9999,
+
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+  },
+
+  dropdownScroll: {
+    flex: 1,
+  },
+
+  dropdownScrollContent: {
+    paddingVertical: 4,
+  },
+
+  dropdownItem: {
+    minHeight: 50,
+    paddingHorizontal: 14,
+
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  dropdownItemText: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "600",
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* PATROL BUTTON                                                         */
+  /* --------------------------------------------------------------------- */
+
+  patrolButton: {
+    minHeight: 70,
+    borderRadius: 16,
+
+    // Reduced from 16 to improve spacing
+    // between duty selector and button.
+    marginTop: 16,
+
+    paddingHorizontal: 18,
+
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  patrolButtonIcon: {
+    marginRight: 11,
+  },
+
+  patrolButtonTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+
+  patrolButtonSubtitle: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* SYNC                                                                  */
+  /* --------------------------------------------------------------------- */
+
+  syncStatus: {
+    minHeight: 82,
+    borderRadius: 15,
+    borderWidth: 1,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 11,
+  },
+
+  syncCount: {
+    fontSize: 27,
+    fontWeight: "900",
+    lineHeight: 29,
+  },
+
+  syncCountLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 1,
+  },
+
+  syncStatusRight: {
+    alignItems: "flex-end",
+  },
+
+  syncStatusText: {
+    fontSize: 17,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+    marginTop: 4,
+  },
+
+  syncButton: {
+    height: 49,
+    borderRadius: 13,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  syncButtonText: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+    marginLeft: 7,
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* SCHEDULE                                                              */
+  /* --------------------------------------------------------------------- */
+
+  scheduleCount: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  scheduleItem: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 13,
+    marginBottom: 11,
+  },
+
+  scheduleItemHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  scheduleNumber: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  scheduleDuty: {
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  scheduleSectorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 3,
+  },
+
+  scheduleSector: {
+    fontSize: 16,
+    marginLeft: 3,
+    flexShrink: 1,
+  },
+
+  scheduleInfoGrid: {
+    flexDirection: "row",
+    marginTop: 13,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+
+  scheduleInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  scheduleInfoLabel: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  scheduleInfoValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+
+  assignedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  assignedHeaderText: {
+    fontSize: 14,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginLeft: 6,
+  },
+
+  personnelCount: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 7,
+  },
+
+  personnelRow: {
+    minHeight: 74,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 7,
+  },
+
+  personnelAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  personnelName: {
+    fontSize: 17,
+    fontWeight: "800",
+  },
+
+  personnelActions: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 7,
+  },
+
+  smallContactButton: {
+    minHeight: 28,
+    maxWidth: "49%",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  smallContactText: {
+    fontSize: 17,
+    fontWeight: "600",
+    marginLeft: 5,
+    flexShrink: 1,
+  },
+
+  emptyPersonnel: {
+    minHeight: 80,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 9,
+  },
+
+  emptySchedule: {
+    minHeight: 190,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+
+  emptyScheduleIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 11,
+  },
+
+  emptyScheduleTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  emptyScheduleText: {
+    fontSize: 17,
+    lineHeight: 18,
+    textAlign: "center",
+    marginTop: 5,
+    maxWidth: 280,
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* SOS                                                                   */
+  /* --------------------------------------------------------------------- */
+
+  sosContainer: {
+    width: "100%",
+    paddingBottom: 20,
+  },
+
+  sosCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+  },
+
+  sosHeader: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+
+  sosIconCircle: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+
+  sosTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  sosSubtitle: {
+    fontSize: 17,
+    marginTop: 4,
+  },
+
+  sosWarning: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 13,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 16,
+  },
+
+  sosWarningText: {
+    flex: 1,
+    fontSize: 17,
+    lineHeight: 18,
+    marginLeft: 9,
+  },
+
+  sosStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+
+  sosStatusIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 11,
+  },
+
+  sosStatusTitle: {
+    fontSize: 17,
+    fontWeight: "900",
+  },
+
+  sosStatusText: {
+    fontSize: 16,
+    marginTop: 3,
+  },
+
+  sosContacts: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 13,
+  },
+
+  sosContactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+
+  sosContactText: {
+    fontSize: 17,
+    marginLeft: 8,
+  },
+
+  returnButton: {
+    height: 52,
+    borderRadius: 13,
+    backgroundColor: "#16A34A",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 18,
+  },
+
+  returnButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+    marginLeft: 7,
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* BOTTOM NAV                                                           */
+  /* --------------------------------------------------------------------- */
+
+  bottomNav: {
+    position: "absolute",
+
+    left: 0,
+    right: 0,
+    bottom: 0,
+
+    height: 76,
+
+    borderTopWidth: 1,
+
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+
+    paddingHorizontal: 4,
+
+    elevation: 20,
+
+    shadowOffset: {
+      width: 0,
+      height: -3,
+    },
+
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+
+    zIndex: 9999,
+  },
+
+  navItem: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  navIconContainer: {
+    width: 48,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  navLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+
+  sosNavWrapper: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    marginTop: -30,
+  },
+
+  sosNavButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 34,
+    backgroundColor: "#EF4444",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 5,
+    borderColor: "#FFFFFF",
+    elevation: 8,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 7,
+  },
+
+  sosNavLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#EF4444",
+    marginTop: 2,
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* CONTACT                                                               */
+  /* --------------------------------------------------------------------- */
+
+  contactButton: {
+    minHeight: 52,
+    borderRadius: 11,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  contactLabel: {
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+
+  contactValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+});
