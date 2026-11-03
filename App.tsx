@@ -13,6 +13,7 @@ import { getStyles, getThemeColors } from "./src/theme/styles";
 
 import { LoginView } from "./src/components/LoginView";
 import { RegisterView } from "./src/components/RegisterView";
+import { RegisterWebview } from "./src/components/RegisterWebview";
 import { DashboardView } from "./src/components/DashboardView";
 import { TopCommandHeader } from "./src/components/TopCommandHeader";
 import { AccountScreen } from "./src/components/AccountScreen";
@@ -62,7 +63,7 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
 
   const [viewMode, setViewMode] = useState<
-    "login" | "register" | "forgotpassword"
+    "login" | "register" | "registerwebview" | "forgotpassword"
   >("login");
 
   const [isInitializing, setIsInitializing] = useState(true);
@@ -250,6 +251,17 @@ export default function App() {
         )}
 
         {/* ======================================================
+            REGISTER WEBVIEW
+        ====================================================== */}
+
+        {viewMode === "registerwebview" && (
+          <RegisterWebview
+            isDarkTheme={isDarkTheme}
+            onBackToLogin={() => setViewMode("login")}
+          />
+        )}
+
+        {/* ======================================================
             FORGOT PASSWORD
         ====================================================== */}
 
@@ -278,7 +290,7 @@ export default function App() {
             onRequestForeground={requestForegroundPermission}
             onRequestBackground={requestBackgroundPermission}
             onEnableGpsInline={enableGpsInline}
-            onGoToRegister={() => setViewMode("register")}
+            onGoToRegister={() => setViewMode("registerwebview")}
             onForgotPassword={handleForgotPassword}
           />
         )}

@@ -6,6 +6,7 @@ import android.telephony.CellInfo
 import android.telephony.CellSignalStrengthLte
 import android.telephony.CellSignalStrengthNr
 import android.telephony.TelephonyManager
+import android.annotation.TargetApi
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise

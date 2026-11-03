@@ -52,7 +52,7 @@ export const ForgotPasswordScreen = ({
       // Send password reset link using Supabase
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         // You can configure redirect URL if needed
-        // redirectTo: `${window.location.origin}/update-password`
+        redirectTo: "https://project-patrol.ilocosnorteppo.com/reset-password",
       });
 
       if (error) {

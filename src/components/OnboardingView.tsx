@@ -6,8 +6,9 @@ import {
   Modal,
   StyleSheet,
   Animated,
-  UIManager,
-  findNodeHandle,
+  Platform,
+  StatusBar,
+  useWindowDimensions,
 } from "react-native";
 import { getThemeColors } from "../theme/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -27,7 +28,7 @@ interface OnboardingStep {
   refKey: keyof OnboardingTourRef;
   title: string;
   body: string;
-  tooltipPosition: "above" | "below" | "left" | "right";
+  tooltipPosition: "above" | "below";
   icon: keyof typeof Ionicons.glyphMap;
 }
 
@@ -35,8 +36,8 @@ const STEPS: OnboardingStep[] = [
   {
     id: "header",
     refKey: "header",
-    title: "Welcome Officer",
-    body: "View your active officer profile and system status right from the top dashboard header.",
+    title: "Welcome",
+    body: "View your active personnel profile and system status right from the top dashboard header.",
     tooltipPosition: "below",
     icon: "person-circle-outline",
   },
@@ -44,7 +45,7 @@ const STEPS: OnboardingStep[] = [
     id: "dutyDropdown",
     refKey: "dutyDropdown",
     title: "Select Duty & Patrol Mode",
-    body: "Choose your assigned duty type (e.g., Foot Patrolling, Mobile Patrol) before initiating tracking.",
+    body: "Choose your assigned duty activity (e.g., Foot Patrolling, Mobile Patrol) before initiating tracking.",
     tooltipPosition: "below",
     icon: "list-outline",
   },
@@ -68,7 +69,7 @@ const STEPS: OnboardingStep[] = [
     id: "sosButton",
     refKey: "sosButton",
     title: "Distress Signal",
-    body: "Tap this red action button at any time to immediately send an distress signal or log an urgent field incident.",
+    body: "Tap this red action button at any time to immediately send a distress signal or log an urgent field incident.",
     tooltipPosition: "above",
     icon: "alert-circle-outline",
   },
@@ -81,6 +82,26 @@ const STEPS: OnboardingStep[] = [
     icon: "grid-outline",
   },
 ];
+
+// Space between the spotlight and the tooltip
+const TOOLTIP_GAP = 16;
+// Keep the tooltip clear of the status bar and the progress dots
+const TOP_MARGIN = 40;
+const BOTTOM_MARGIN = 80;
+
+// On Android, measureInWindow() is relative to the area BELOW the status bar,
+// but a Modal with statusBarTranslucent starts at the very top of the screen.
+// Adding the status bar height lines the spotlight up with the real element.
+// If your app already draws behind the status bar (edge-to-edge / translucent
+// StatusBar), measurements already include it: set this to 0.
+const STATUS_BAR_OFFSET =
+  Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
+
+// Fine-tune if the spotlight is still slightly off (positive = move down,
+// negative = move up), in dp.
+const MANUAL_Y_ADJUST = 0;
+
+const Y_OFFSET = STATUS_BAR_OFFSET + MANUAL_Y_ADJUST;
 
 interface OnboardingViewProps {
   isDarkTheme: boolean;
@@ -96,6 +117,8 @@ export const OnboardingView = ({
   tourRefs,
 }: OnboardingViewProps) => {
   const colors = getThemeColors(isDarkTheme);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [spotlightLayout, setSpotlightLayout] = useState<{
     x: number;
@@ -103,56 +126,14 @@ export const OnboardingView = ({
     width: number;
     height: number;
   } | null>(null);
+  // Real tooltip height (measured), used to place it above a target
+  const [tooltipHeight, setTooltipHeight] = useState(200);
+
   const spotlightAnim = useRef(new Animated.Value(0)).current;
   const tooltipAnim = useRef(new Animated.Value(0)).current;
-  const spotlightRef = useRef<View>(null);
 
   const step = STEPS[activeStepIndex];
   const isLast = activeStepIndex === STEPS.length - 1;
-
-  // Measure target element and animate spotlight safely
-  useEffect(() => {
-    if (!visible || !tourRefs) return;
-
-    const ref = tourRefs[step.refKey];
-    
-    // Fallback default center coordinates if ref isn't ready yet
-    const fallbackLayout = { x: 50, y: 150, width: 300, height: 100 };
-
-    if (!ref || !ref.current) {
-      // Use fallback so it doesn't get stuck hidden
-      setSpotlightLayout(fallbackLayout);
-      startAnimations();
-      return;
-    }
-
-    const handle = findNodeHandle(ref.current);
-    if (!handle) {
-      setSpotlightLayout(fallbackLayout);
-      startAnimations();
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      UIManager.measureInWindow(handle, (x, y, width, height) => {
-        if (
-          typeof x === "number" &&
-          typeof y === "number" &&
-          typeof width === "number" &&
-          typeof height === "number" &&
-          width > 0 &&
-          height > 0
-        ) {
-          setSpotlightLayout({ x, y, width, height });
-        } else {
-          setSpotlightLayout(fallbackLayout); // Fallback if measurement is 0
-        }
-        startAnimations();
-      });
-    }, 50);
-
-    return () => clearTimeout(timer);
-  }, [activeStepIndex, visible, step.refKey, tourRefs]);
 
   const startAnimations = () => {
     Animated.parallel([
@@ -169,6 +150,62 @@ export const OnboardingView = ({
       }),
     ]).start();
   };
+
+  // Measure the target element for the current step
+  useEffect(() => {
+    if (!visible || !tourRefs) return;
+
+    let cancelled = false;
+
+    // Used only if the target can't be measured
+    const fallbackLayout = {
+      x: 16,
+      y: 120,
+      width: screenWidth - 32,
+      height: 80,
+    };
+
+    const finish = (layout: typeof fallbackLayout) => {
+      if (cancelled) return;
+      setSpotlightLayout(layout);
+      startAnimations();
+    };
+
+    // Fade the tooltip in again for every step
+    tooltipAnim.setValue(0);
+
+    const timer = setTimeout(() => {
+      const target = tourRefs[step.refKey]?.current;
+
+      if (!target) {
+        finish(fallbackLayout);
+        return;
+      }
+
+      // measureInWindow works with the Modal's statusBarTranslucent setting,
+      // so coordinates line up on Android and iOS.
+      target.measureInWindow((x, y, width, height) => {
+        if (
+          typeof x === "number" &&
+          typeof y === "number" &&
+          typeof width === "number" &&
+          typeof height === "number" &&
+          width > 0 &&
+          height > 0
+        ) {
+          finish({ x, y: y + Y_OFFSET, width, height });
+        } else {
+          finish(fallbackLayout);
+        }
+      });
+    }, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStepIndex, visible, step.refKey, tourRefs, screenWidth]);
 
   // Reset when hidden
   useEffect(() => {
@@ -203,6 +240,7 @@ export const OnboardingView = ({
       <Modal
         visible={visible}
         transparent={true}
+        statusBarTranslucent
         animationType="fade"
         onRequestClose={onClose}
       >
@@ -214,32 +252,40 @@ export const OnboardingView = ({
   const { x, y, width, height } = spotlightLayout;
   const centerX = x + width / 2;
 
-  // Tooltip positioning
-  const tooltipWidth = Math.min(320, width * 2.5);
-  let tooltipX = centerX - tooltipWidth / 2;
-  let tooltipY: number;
+  // ---------------------------------------------------------------------
+  // Tooltip position (same rule for every step, including the header)
+  // ---------------------------------------------------------------------
+  const tooltipWidth = Math.min(340, screenWidth - 32);
 
-  if (step.id === "header") {
-    // FORCE Step 1 to sit right below the header without relying on measured Y offset
-    tooltipY = 140; // Adjust this number smaller (e.g. 110) to go higher, or larger to go down
-  } else if (step.tooltipPosition === "above") {
-    tooltipY = y - (step.id === "sosButton" ? 260 : 210);
-  } else {
-    tooltipY = y + height + 20;
+  let tooltipX = centerX - tooltipWidth / 2;
+  tooltipX = Math.max(16, Math.min(screenWidth - tooltipWidth - 16, tooltipX));
+
+  const belowY = y + height + TOOLTIP_GAP;
+  const aboveY = y - tooltipHeight - TOOLTIP_GAP;
+
+  let tooltipY = step.tooltipPosition === "above" ? aboveY : belowY;
+
+  // Flip to the other side if the preferred side doesn't fit
+  if (
+    tooltipY < TOP_MARGIN &&
+    belowY + tooltipHeight <= screenHeight - BOTTOM_MARGIN
+  ) {
+    tooltipY = belowY;
+  } else if (
+    tooltipY + tooltipHeight > screenHeight - BOTTOM_MARGIN &&
+    aboveY >= TOP_MARGIN
+  ) {
+    tooltipY = aboveY;
   }
 
-  // Clamp tooltip to screen bounds
-  const screenWidth = 390; 
-  tooltipX = Math.max(16, Math.min(screenWidth - tooltipWidth - 16, tooltipX));
-  
-  // Lower the floor clamp so it isn't blocked from moving up
-  tooltipY = Math.max(40, tooltipY);
+  // Final clamp so it always stays on screen
+  tooltipY = Math.max(
+    TOP_MARGIN,
+    Math.min(screenHeight - tooltipHeight - BOTTOM_MARGIN, tooltipY),
+  );
 
   const tooltipStyle = {
-    transform: [
-      { translateX: tooltipX },
-      { translateY: tooltipY },
-    ],
+    transform: [{ translateX: tooltipX }, { translateY: tooltipY }],
     opacity: tooltipAnim,
   } as any;
 
@@ -247,20 +293,17 @@ export const OnboardingView = ({
     <Modal
       visible={visible}
       transparent={true}
+      statusBarTranslucent
       animationType="fade"
       onRequestClose={onClose}
     >
       <View style={localStyles.overlay}>
         {/* Spotlight cutout */}
         <Animated.View
-          ref={spotlightRef}
           style={[
             localStyles.spotlight,
             {
-              transform: [
-                { translateX: x },
-                { translateY: y },
-              ],
+              transform: [{ translateX: x }, { translateY: y }],
               width,
               height,
               borderRadius: 14,
@@ -272,12 +315,12 @@ export const OnboardingView = ({
 
         {/* Tooltip */}
         <Animated.View
-          style={[
-            localStyles.tooltip,
-            { width: tooltipWidth },
-            tooltipStyle,
-          ]}
+          style={[localStyles.tooltip, { width: tooltipWidth }, tooltipStyle]}
           pointerEvents="box-none"
+          onLayout={(e) => {
+            const h = e.nativeEvent.layout.height;
+            if (Math.abs(h - tooltipHeight) > 1) setTooltipHeight(h);
+          }}
         >
           <View style={localStyles.tooltipContent}>
             <View style={localStyles.tooltipHeader}>
@@ -376,15 +419,16 @@ const localStyles = StyleSheet.create({
   },
   spotlight: {
     position: "absolute",
+    top: 0,
+    left: 0,
     backgroundColor: "transparent",
     borderWidth: 3,
     borderColor: "#FACC15",
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 10,
   },
   tooltip: {
     position: "absolute",
+    top: 0,
+    left: 0,
     backgroundColor: "#142035",
     borderRadius: 16,
     borderWidth: 1,
@@ -395,21 +439,6 @@ const localStyles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     shadowRadius: 20,
     elevation: 12,
-  },
- tooltipArrow: {
-    width: 0,
-    height: 0,
-    backgroundColor: "transparent",
-    borderStyle: "solid",
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 8, // Adjust width/height to change the tip size
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    // Change this background color to match your tooltip card background
-    // borderBottomColor: isDarkTheme ? "#142035" : "#FFFFFF", 
-    alignSelf: "center",
-    marginTop: -8, // Pulls it slightly up to overlap the card edge cleanly
   },
   tooltipContent: {},
   tooltipHeader: {

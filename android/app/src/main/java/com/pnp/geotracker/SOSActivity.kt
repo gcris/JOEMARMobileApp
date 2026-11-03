@@ -9,6 +9,8 @@ import android.media.MediaPlayer
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.content.Context
+import android.view.Window
+import android.view.WindowManager
 import android.app.NotificationManager
 
 import androidx.appcompat.app.AppCompatActivity
@@ -29,12 +31,22 @@ class SOSActivity : AppCompatActivity() {
                 0
             )
             vibrator.vibrate(effect)
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
         } else {
             @Suppress("DEPRECATION")
             vibrator.vibrate(longArrayOf(0, 1000, 500), 0)
         }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
 
         mediaPlayer = MediaPlayer.create(this, R.raw.sos_alert)
         mediaPlayer?.apply {

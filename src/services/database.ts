@@ -18,7 +18,7 @@ export const getPersonnelByBadge = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*, rank(*), unit(*), schedule_assignments(*)")
+      .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*), schedule_assignments(*)")
       .eq("badge_number", badgeNumber)
       .single();
 
@@ -58,7 +58,7 @@ export const getPersonnelByEmail = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*, rank(*), unit(*), schedule_assignments(*)")
+      .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*), schedule_assignments(*)")
       .eq("email", email.toLowerCase())
       .single();
 
@@ -141,7 +141,7 @@ export const getPersonnelById = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*, rank(*), unit(*), schedule_assignments(*)")
+      .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*), schedule_assignments(*)")
       .eq("id", id)
       .single();
 
@@ -440,12 +440,14 @@ export const insertPatrolLogs = async (logs: PersonnelLog[]): Promise<void> => {
 export const getPatrolLogs = async (
   personnelId?: string,
 ): Promise<PersonnelLog[]> => {
-  try {
-    // ============================================================
-    // FETCH ONLY YESTERDAY + TODAY
-    // ============================================================
+  if (!personnelId) return [];
 
-    const now = new Date();
+  try {
+      // ============================================================
+      // FETCH ONLY YESTERDAY + TODAY
+      // ============================================================
+
+      const now = new Date();
 
     // Start of today
     const todayStart = new Date(
@@ -460,7 +462,7 @@ export const getPatrolLogs = async (
 
     // Start of yesterday
     const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 10);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
     // Start of tomorrow
     const tomorrowStart = new Date(todayStart);
@@ -535,9 +537,8 @@ export const getPatrolLogs = async (
       // FILTER BY PERSONNEL IF PROVIDED
       // ==========================================================
 
-      if (personnelId) {
-        query = query.eq("personnel_id", personnelId);
-      }
+      console.log("Personnel ID: ", personnelId);
+      query = query.eq("personnel_id", personnelId);
 
       const { data, error } = await query;
 

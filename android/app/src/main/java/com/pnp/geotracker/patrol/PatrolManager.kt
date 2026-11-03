@@ -66,7 +66,7 @@ class PatrolManager(
         locationEngine = null
 
         Companion.running = false
-        Companion.dutyType = ""
+        // Keep the last-used duty type so getDutyType() remains accurate after patrol stops.
         Companion.personnelId = ""
         Companion.startedAt = 0
     }

@@ -1,0 +1,13 @@
+{
+  "name": "patrol-module",
+  "version": "1.0.0",
+  "description": "Native iOS module for background GPS tracking, SQLite persistence, and Supabase sync",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "platforms": ["ios"],
+  "expo": {
+    "ios": {
+      "podspecPath": "PatrolModule.podspec"
+    }
+  }
+}

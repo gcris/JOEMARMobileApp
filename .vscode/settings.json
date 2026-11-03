@@ -1,0 +1,8 @@
+{
+  "java.import.gradle.enabled": false,
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/.git/**"
+  ],
+  "gradle.nestedProjects": false
+}

@@ -2,6 +2,7 @@ package com.pnp.geotracker
 
 import com.pnp.geotracker.patrol.PatrolManager
 import com.pnp.geotracker.PatrolServiceModule
+import com.pnp.geotracker.sync.SyncManager
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -22,6 +23,8 @@ class PatrolForegroundService : Service() {
     private lateinit var patrolManager: PatrolManager
 
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var syncManager: SyncManager
+    private val syncing = java.util.concurrent.atomic.AtomicBoolean(false)
 
     companion object {
         const val TAG = "PatrolService"
@@ -33,6 +36,23 @@ class PatrolForegroundService : Service() {
 
         const val ACTION_OPEN_APP =
             "com.pnp.geotracker.OPEN_APP"
+    }
+
+    private val syncRunnable = object : Runnable {
+       override fun run() {
+           if (syncing.compareAndSet(false, true)) {
+               Thread {
+                   try {
+                       syncManager.sync()
+                   } catch (e: Exception) {
+                       Log.e(TAG, "Periodic sync failed", e)
+                   } finally {
+                       syncing.set(false)
+                   }
+               }.start()
+           }
+           handler.postDelayed(this, 5_000L)
+       }
     }
 
     private val notificationChecker = object : Runnable {

@@ -12,7 +12,26 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.pnp.geotracker"
+      "bundleIdentifier": "com.pnp.geotracker",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app requires location access to track patrol routes and record GPS coordinates during active duty.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Background location is required to continue recording patrol coordinates even when the app is minimized or the screen is off.",
+        "NSCameraUsageDescription": "Camera access is needed to capture profile photos for personnel identification.",
+        "NSPhotoLibraryUsageDescription": "Photo library access is required to select existing images for profile photos.",
+        "NSMicrophoneUsageDescription": "Microphone access may be used for voice notes during incident reporting.",
+        "UIBackgroundModes": [
+          "location",
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "associatedDomains": [
+        "applinks:yourdomain.com"
+      ],
+      "entitlements": {
+        "com.apple.developer.location.allows-background-access": true
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -37,21 +56,11 @@
         "VIBRATE"
       ]
     },
-    "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysPermission": "Allow this app to access your location even when the app is closed.",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
-        }
-      ]
-    ],
     "extra": {
       "eas": {
-        "projectId": "29c9d23c-4e2f-4cdf-8370-95fe7e791048"
+        "projectId": "2626460e-86cf-4930-ba43-6b13644a1e97"
       }
     },
-    "owner": "inppo"
+    "owner": "inppo-team"
   }
 }

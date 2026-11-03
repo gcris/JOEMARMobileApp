@@ -412,6 +412,7 @@ export const LoginView = ({
   isDarkTheme,
   onToggleTheme,
   onForgotPassword,
+  onGoToRegister,
 }: LoginViewProps) => {
   const { enable2FA } = usePatrolState();
 
@@ -484,7 +485,7 @@ export const LoginView = ({
    * allow the user to create the new password there.
    */
 
-  const WEB_RESET_PASSWORD_URL = "https://ilocosnorteppo.com";
+  const WEB_RESET_PASSWORD_URL = "https://project-patrol.ilocosnorteppo.com";
 
   /* ------------------------------------------------------------------------ */
   /*                            LOAD SAVED EMAIL                                */
@@ -558,6 +559,7 @@ export const LoginView = ({
           break;
 
         case "NEED_MFA_SETUP":
+          setMfaFactorId(res.factorId);
           setMfaSetupSecret(res.secret);
           setMfaSetupCode("");
           setStep("mfaSetup");
@@ -634,13 +636,19 @@ export const LoginView = ({
   /*                           MFA SETUP                                       */
   /* ------------------------------------------------------------------------ */
 
-  const verifyMfaSetup = async () => {
+  
+  const verifyMfaSetup = async (): Promise<void> => {
     const code = mfaSetupCode.trim();
 
-    if (code.length !== 6) {
+    if (!/^\d{6}$/.test(code)) {
+      Alert.alert("Invalid Code", "Enter the 6-digit code.");
+      return;
+    }
+
+    if (!mfaFactorId) {
       Alert.alert(
-        "Invalid Security Code",
-        "Please enter the 6-digit Google Authenticator code.",
+        "MFA Setup Error",
+        "The MFA factor ID is missing. Please restart MFA setup.",
       );
       return;
     }
@@ -648,60 +656,51 @@ export const LoginView = ({
     setMfaSetupLoading(true);
 
     try {
-      const status = await checkMFAStatus(email.trim());
+      console.log("[MFA Setup] Verifying authenticator code");
 
-      const isVerified = await enable2FA(email.trim(), code, status.factorId);
+      const isVerified = await enable2FA(email.trim(), code, mfaFactorId);
 
       if (!isVerified) {
+        setMfaSetupCode("");
+
         Alert.alert(
           "Verification Failed",
-          "The security code is incorrect or has expired.",
+          "The code is invalid or expired. Check your authenticator and try again.",
         );
 
-        setMfaSetupCode("");
         return;
       }
 
-      const loginResult = await onLogin(email.trim(), password, code);
+      console.log("[MFA Setup] Factor verification succeeded");
 
-      if (loginResult.status === "SUCCESS") {
-        setEmail("");
-        setPassword("");
-        setOtp("");
-        setMfaSetupCode("");
-        setMfaSetupSecret("");
-        setMfaFactorId("");
-        setStep("credentials");
-      } else if (loginResult.status === "ERROR") {
-        setErrorMessage(loginResult.message);
+      // Do not call completeLogin() or navigate to the dashboard here.
+      // MFA enrollment should finish before a separate login is performed.
 
-        setEmail("");
-        setPassword("");
-        setOtp("");
-        setMfaSetupCode("");
-        setMfaSetupSecret("");
-        setMfaFactorId("");
+      setMfaSetupCode("");
+      setMfaSetupSecret("");
+      setMfaFactorId("");
+      setPassword("");
+      setOtp("");
+      setStep("credentials");
 
-        setStep("credentials");
-      } else {
-        Alert.alert(
-          "Login Error",
-          "MFA was activated, but the login could not be completed.",
-        );
-      }
-    } catch (error) {
-      console.error("MFA setup verification error:", error);
+      Alert.alert(
+        "MFA Activated",
+        "Your authenticator has been verified. Please sign in again using your password and your six-digit authenticator code.",
+      );
+    } catch (error: unknown) {
+      console.error("[MFA Setup] Verification error:", error);
 
       Alert.alert(
         "Verification Error",
-        "Failed to verify your Google Authenticator code.",
+        error instanceof Error
+          ? error.message
+          : "Failed to verify the authenticator code.",
       );
-
-      setMfaSetupCode("");
     } finally {
       setMfaSetupLoading(false);
     }
   };
+
 
   /* ------------------------------------------------------------------------ */
   /*                         FORGOT PASSWORD EMAIL                             */
@@ -737,7 +736,7 @@ export const LoginView = ({
        */
 
       const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
-        redirectTo: WEB_RESET_PASSWORD_URL,
+        redirectTo: `${WEB_RESET_PASSWORD_URL}/reset-password`,
       });
 
       if (error) {
@@ -836,34 +835,6 @@ export const LoginView = ({
     return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
       otpauthUri,
     )}`;
-  };
-
-  /* ------------------------------------------------------------------------ */
-  /*                           WEB REGISTRATION                                */
-  /* ------------------------------------------------------------------------ */
-
-  const WEB_REGISTRATION_URL = "https://project-patrol.ilocosnorteppo.com/register";
-
-  const handleWebRegistration = async () => {
-    try {
-      const supported = await Linking.canOpenURL(WEB_REGISTRATION_URL);
-
-      if (supported) {
-        await Linking.openURL(WEB_REGISTRATION_URL);
-      } else {
-        Alert.alert(
-          "Unable to Open Registration",
-          "The registration page could not be opened. Please try again.",
-        );
-      }
-    } catch (error) {
-      console.error("Failed to open registration page:", error);
-
-      Alert.alert(
-        "Unable to Open Registration",
-        "Please check your internet connection and try again.",
-      );
-    }
   };
 
   /* ------------------------------------------------------------------------ */
@@ -1108,7 +1079,7 @@ export const LoginView = ({
                 icon="mail-outline"
                 label="Email Address"
                 value={email}
-                placeholder="name@example.com"
+                placeholder="name@gmail.com"
                 onChangeText={(text) => {
                   setEmail(text);
                   clearLoginMessages();
@@ -1197,7 +1168,7 @@ export const LoginView = ({
                   borderColor: isDarkTheme ? "#475569" : "#CBD5E1",
                   alignItems: "center",
                 }}
-                onPress={handleWebRegistration}
+                onPress={onGoToRegister}
                 activeOpacity={0.7}
               >
                 <View
@@ -1425,13 +1396,59 @@ export const LoginView = ({
                     ]}
                   >
                     <Image
-                      source={{
-                        uri: getQRCodeUrl(),
-                      }}
+                      source={{ uri: getQRCodeUrl() }}
                       style={styles.qrCode}
                       resizeMode="contain"
                     />
                   </View>
+
+                  {/* SETUP KEY (can't scan? type or paste this) */}
+                  <Text
+                    style={{
+                      marginTop: 14,
+                      marginBottom: 6,
+                      fontSize: 12,
+                      fontWeight: "800",
+                      letterSpacing: 1,
+                      color: isDarkTheme ? "#94A3B8" : "#64748B",
+                    }}
+                  >
+                    SETUP KEY
+                  </Text>
+
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      Clipboard.setString(mfaSetupSecret);
+                      Alert.alert(
+                        "Setup Key Copied",
+                        "The setup key has been copied to your clipboard.",
+                      );
+                    }}
+                    style={{
+                      paddingVertical: 14,
+                      paddingHorizontal: 12,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: isDarkTheme ? "#334155" : "#CBD5E1",
+                      backgroundColor: isDarkTheme ? "#0B1220" : "#F8FAFC",
+                    }}
+                  >
+                    <Text
+                      selectable
+                      style={{
+                        textAlign: "center",
+                        fontSize: 18,
+                        fontWeight: "800",
+                        letterSpacing: 2,
+                        fontFamily:
+                          Platform.OS === "android" ? "monospace" : "Menlo",
+                        color: isDarkTheme ? "#F8FAFC" : "#0F172A",
+                      }}
+                    >
+                      {mfaSetupSecret.replace(/(.{4})/g, "$1 ").trim()}
+                    </Text>
+                  </TouchableOpacity>
 
                   <TouchableOpacity
                     style={[
@@ -1443,7 +1460,6 @@ export const LoginView = ({
                     ]}
                     onPress={() => {
                       Clipboard.setString(mfaSetupSecret);
-
                       Alert.alert(
                         "Setup Key Copied",
                         "The Google Authenticator setup key has been copied to your clipboard.",
@@ -1455,7 +1471,6 @@ export const LoginView = ({
                       size={18}
                       color={isDarkTheme ? "#FACC15" : "#1E3A8A"}
                     />
-
                     <Text
                       style={{
                         marginLeft: 7,
@@ -1466,6 +1481,43 @@ export const LoginView = ({
                       COPY SETUP KEY
                     </Text>
                   </TouchableOpacity>
+
+                  {/* NOTE: account name */}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      marginTop: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: isDarkTheme ? "#78350F" : "#FDE68A",
+                      backgroundColor: isDarkTheme
+                        ? "rgba(250,204,21,0.08)"
+                        : "#FFFBEB",
+                    }}
+                  >
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={20}
+                      color={isDarkTheme ? "#FACC15" : "#B45309"}
+                      style={{ marginRight: 8, marginTop: 1 }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          lineHeight: 19,
+                          color: isDarkTheme ? "#E2E8F0" : "#78350F",
+                        }}
+                      >
+                        Name the account{" "}
+                        <Text style={{ fontWeight: "900" }}>
+                          INPPO Project PATROL
+                        </Text>{" "}
+                        in Google Authenticator so you can find it easily.
+                      </Text>
+                    </View>
+                  </View>
                 </>
               ) : (
                 <View style={styles.loadingSetup}>
@@ -1623,7 +1675,7 @@ export const LoginView = ({
                 icon="mail-outline"
                 label="Email Address"
                 value={forgotEmail}
-                placeholder="name@example.com"
+                placeholder="name@gmail.com"
                 onChangeText={(text) => {
                   setForgotEmail(text);
 

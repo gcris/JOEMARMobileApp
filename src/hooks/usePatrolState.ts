@@ -187,21 +187,26 @@ export const usePatrolState = () => {
   // LOAD PERSONNEL LOGS
   // ============================================================
 
-  const loadPersonnelLogs = useCallback(async () => {
-    try {
-      const logs = await getPatrolLogs();
+  const loadPersonnelLogs = useCallback(
+    async (personnelId?: string) => {
+      // typeof check: a click handler may pass an event object as the argument
+      const id = typeof personnelId === "string" ? personnelId : personnel?.id;
 
-      if (Array.isArray(logs)) {
-        setPersonnelLogs(logs);
-      } else {
+      if (!id) {
+        setPersonnelLogs([]);
+        return;
+      }
+
+      try {
+        const logs = await getPatrolLogs(id);
+        setPersonnelLogs(Array.isArray(logs) ? logs : []);
+      } catch (error) {
+        console.error("Failed to load personnel logs:", error);
         setPersonnelLogs([]);
       }
-    } catch (error) {
-      console.error("Failed to load personnel logs:", error);
-
-      setPersonnelLogs([]);
-    }
-  }, []);
+    },
+    [personnel?.id],
+  );
 
   // ============================================================
   // REFRESH PATROL STATUS
@@ -214,7 +219,12 @@ export const usePatrolState = () => {
       setPatrolStatus(status);
       setIsShiftActive(status.running);
       setUnsyncedCount(status.unsyncedLocations);
-      setActiveDutyType(status.dutyType);
+      // Only update when native side returns a non-empty duty type;
+      // stopPatrol() leaves dutyType intact, so an empty value means
+      // no change from the UI selection and should not overwrite it.
+      if (status.dutyType) {
+        setActiveDutyType(status.dutyType);
+      }
     } catch (e) {
       console.warn(e);
     }
@@ -365,7 +375,7 @@ export const usePatrolState = () => {
   }, [updateUnsyncedCounter, loadPersonnelLogs]);
 
   // ============================================================
-  // INITIAL GPS / PATROL STATUS
+  // INITIAL GPS / PATROL STATUS (also refreshes every 15 seconds)
   // ============================================================
 
   useEffect(() => {
@@ -425,17 +435,8 @@ export const usePatrolState = () => {
     })();
   }, [personnel, refreshPatrolStatus, loadPersonnelLogs]);
 
-  // ============================================================
-  // PATROL STATUS REFRESH
-  // ============================================================
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      refreshPatrolStatus();
-    }, 15000);
-
-    return () => clearInterval(timer);
-  }, [refreshPatrolStatus]);
+  // (The duplicate "PATROL STATUS REFRESH" 15-second timer was removed:
+  //  the effect above already refreshes the status every 15 seconds.)
 
   // ============================================================
   // CHECK SCHEDULED TIME
@@ -502,6 +503,7 @@ export const usePatrolState = () => {
   // ============================================================
 
   const completeLogin = async (pUser: Personnel, emailInput: string) => {
+    console.log("pUser: ", pUser);
     setPersonnel(pUser);
 
     const assignedSched = await getScheduleByPersonnel(pUser.id);
@@ -513,7 +515,7 @@ export const usePatrolState = () => {
     await refreshPatrolStatus();
 
     // Load local patrol logs after login.
-    await loadPersonnelLogs();
+    await loadPersonnelLogs(pUser.id);
 
     try {
       const token = await FCMModule.getToken();
@@ -522,6 +524,7 @@ export const usePatrolState = () => {
         .from("personnel")
         .update({
           fcm_token: token,
+          is_online: true,
         })
         .eq("id", pUser.id);
 
@@ -535,6 +538,7 @@ export const usePatrolState = () => {
   // LOGIN
   // ============================================================
 
+  
   const login = async (
     emailInput: string,
     passwordInput: string,
@@ -585,28 +589,35 @@ export const usePatrolState = () => {
 
       const authUser = data.user;
 
-      const { data: remoteProfile, error: profileErr } = await supabase
+      // Lookup personnel by the new relational link (personnel.user_id → auth.users.id).
+      // Legacy accounts that predate this change may still have personnel.id == authUser.id
+      // with a null user_id; fall back to that path so existing officers can still log in.
+      let { data: remoteProfile, error: profileErr } = await supabase
         .from("personnel")
-        .select("*, rank(*), unit(*)")
-        .eq("id", authUser.id)
+        .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*)")
+        .eq("user_id", authUser.id)
         .maybeSingle();
 
-      if (profileErr) {
-        throw profileErr;
+      // Fallback: legacy account where user_id was never populated — id matched auth UUID
+      if (!remoteProfile) {
+        const { data: legacyProfile } = await supabase
+          .from("personnel")
+          .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*)")
+          .eq("id", authUser.id)
+          .maybeSingle();
+        remoteProfile = legacyProfile;
       }
 
+      if (profileErr) throw profileErr;
+
       if (!remoteProfile) {
-        return {
-          status: "NOT_FOUND",
-        };
+        return { status: "NOT_FOUND" };
       }
 
       const pUser = buildPersonnel(remoteProfile, authUser.email ?? email);
 
       if (!pUser.isApproved) {
-        return {
-          status: "PENDING_APPROVAL",
-        };
+        return { status: "PENDING_APPROVAL" };
       }
 
       const projectId =
@@ -619,14 +630,20 @@ export const usePatrolState = () => {
 
       const status = await checkMFAStatus(email);
 
+      // First-time setup or MFA was removed.
       if (!status.isEnabled) {
+        await AsyncStorage.removeItem(`@pnp_supabase_mfa_factor_id_${pUser.id}`);
+
         const enrollment = await enrollMFA(email);
 
         await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
 
         await AsyncStorage.setItem(
           PENDING_MFA_PERSONNEL_KEY,
-          JSON.stringify(pUser),
+          JSON.stringify({
+            id: pUser.id,
+            email: pUser.email ?? email,
+          }),
         );
 
         await AsyncStorage.setItem(
@@ -655,7 +672,18 @@ export const usePatrolState = () => {
         };
       }
 
+      // Existing MFA: require the authenticator code.
       if (!otpCode) {
+        await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
+
+        await AsyncStorage.setItem(
+          PENDING_MFA_PERSONNEL_KEY,
+          JSON.stringify({
+            id: pUser.id,
+            email: pUser.email ?? email,
+          }),
+        );
+
         return {
           status: "NEED_MFA_LOGIN",
           factorId: status.factorId!,
@@ -671,20 +699,26 @@ export const usePatrolState = () => {
         };
       }
 
-      await completeLogin(pUser, emailInput);
+      console.log("MFA verified; completing login");
 
-      return {
-        status: "SUCCESS",
-      };
-    } catch (e: any) {
-      console.error(e);
+      await completeLogin(pUser, email);
+
+      await AsyncStorage.multiRemove([
+        PENDING_MFA_USER_ID_KEY,
+        PENDING_MFA_PERSONNEL_KEY,
+      ]);
+
+      return { status: "SUCCESS" };
+    } catch (e: unknown) {
+      console.error("Login failed:", e);
 
       return {
         status: "ERROR",
-        message: e.message ?? "Authentication failed.",
+        message: e instanceof Error ? e.message : "Authentication failed.",
       };
     }
   };
+
 
   // ============================================================
   // LOGOUT
@@ -695,6 +729,13 @@ export const usePatrolState = () => {
       if (patrolStatus.running) {
         await PatrolService.stopService();
       }
+
+      await supabase
+        .from("personnel")
+        .update({
+          is_online: false,
+        })
+        .eq("id", personnel?.id);
 
       await supabase.auth.signOut();
 
@@ -878,14 +919,24 @@ export const usePatrolState = () => {
         };
       }
 
-      const { error: authError } = await supabaseAdmin.auth.admin.createUser({
-        id: candidate.id,
+      // Create an auth user with a freshly-generated Supabase UUID (do NOT reuse
+      // candidate.id — it is the permanent operational ID and must stay unchanged).
+      // Then link the personnel row via the new user_id column.
+      const { data: createdAuth, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: registrationData.email,
         password: registrationData.password ?? "",
         email_confirm: true,
       });
 
       if (authError) throw authError;
+
+      const newAuthUserId = createdAuth?.user?.id;
+      if (newAuthUserId) {
+        await supabase
+          .from("personnel")
+          .update({ user_id: newAuthUserId, email: registrationData.email })
+          .eq("id", candidate.id);
+      }
 
       if (registrationData.photoUri) {
         const resized = await manipulateAsync(
@@ -1060,64 +1111,212 @@ export const usePatrolState = () => {
   // ENABLE 2FA
   // ============================================================
 
+
+const toPendingPersonnel = (pUser: Personnel): Personnel => ({
+  id: pUser.id,
+  badgeNumber: pUser.badgeNumber,
+  rank: pUser.rank
+    ? {
+        id: pUser.rank.id,
+        rank_name: pUser.rank.rank_name,
+        description: pUser.rank.description,
+      }
+    : null,
+  rankId: pUser.rankId,
+  fullname: pUser.fullname,
+  unitId: pUser.unitId,
+  unit: pUser.unit
+    ? {
+        id: pUser.unit.id,
+        unit_name: pUser.unit.unit_name,
+      }
+    : null,
+  designation: pUser.designation,
+  phoneNumber: pUser.phoneNumber,
+  viberNumber: pUser.viberNumber,
+  isApproved: pUser.isApproved,
+  role: pUser.role,
+  email: pUser.email,
+  photo_url: pUser.photo_url,
+  fcm_token: pUser.fcm_token,
+});
+
+  
+
+
   const enable2FA = async (
     user_id: string,
     code: string,
     factorId?: string,
   ): Promise<boolean> => {
-    if (!user_id) return false;
-
     try {
-      let activeFactorId = factorId;
+      console.log("MFA STEP 1: Reading pending user");
 
-      console.log("activeFactorId: ", activeFactorId);
+      const pendingUserId = await AsyncStorage.getItem(PENDING_MFA_USER_ID_KEY);
 
-      if (!activeFactorId) {
-        activeFactorId =
-          (await AsyncStorage.getItem(
-            `@pnp_supabase_mfa_factor_id_${user_id}`,
-          )) || "";
+      const userId = user_id || pendingUserId || personnel?.id || "";
+      const storageKey = `@pnp_supabase_mfa_factor_id_${userId}`;
 
-        if (!activeFactorId) {
-          throw new Error("No MFA factor ID found. Please enroll MFA first.");
-        }
+      console.log("enable2FA args:", {
+        user_id,
+        userId,
+        factorId,
+      });
+
+      // Validate the authenticator code.
+      if (!code || !/^\d{6}$/.test(code.trim())) {
+        Alert.alert(
+          "Invalid Code",
+          "Enter the six-digit code from your authenticator app.",
+        );
+        return false;
       }
 
-      const verified = await verifyMFAChallenge(activeFactorId, code);
+      // Find the MFA factor.
+      console.log("MFA STEP 2: Reading saved factor");
+
+      let activeFactorId =
+        factorId || (await AsyncStorage.getItem(storageKey)) || "";
+
+      if (!activeFactorId) {
+        console.log("MFA STEP 2A: Looking up MFA factors");
+
+        const { data, error } = await supabase.auth.mfa.listFactors();
+
+        if (error) throw error;
+
+        activeFactorId =
+          (data?.all ?? []).find(
+            (factor) =>
+              factor.factor_type === "totp" && factor.status !== "verified",
+          )?.id ?? "";
+      }
+
+      if (!activeFactorId) {
+        throw new Error(
+          "No MFA factor found. Please sign in again to restart setup.",
+        );
+      }
+
+      // Verify the six-digit authenticator code.
+      console.log("MFA STEP 3: Verifying factor", activeFactorId);
+
+      const verified = await verifyMFAChallenge(activeFactorId, code.trim());
 
       if (!verified) {
         Alert.alert(
           "Verification Failed",
-          "The 6-digit MFA verification code is invalid, expired, or has already been used.",
+          "The MFA code could not be verified. Check the code and try again.",
         );
-
         return false;
       }
 
-      await AsyncStorage.setItem(
-        `@pnp_supabase_mfa_factor_id_${user_id}`,
-        activeFactorId,
-      );
+      console.log("MFA STEP 4: Verification successful");
+
+      // Save the verified factor ID.
+      console.log("MFA STEP 5: Saving factor ID");
+
+      if (userId) {
+        await AsyncStorage.setItem(storageKey, activeFactorId);
+      }
 
       setIs2FAEnabled(true);
 
+      // Read the compact pending-personnel reference.
+      console.log("MFA STEP 6: Reading pending personnel reference");
+
+      const pending = await AsyncStorage.getItem(PENDING_MFA_PERSONNEL_KEY);
+
+      console.log("MFA DEBUG: Pending reference exists:", pending !== null);
+      console.log("MFA DEBUG: Personnel already loaded:", !!personnel);
+
+      let pendingEmail = "";
+
+      if (pending) {
+        let pendingUser: {
+          id?: string;
+          email?: string;
+        };
+
+        try {
+          pendingUser = JSON.parse(pending);
+        } catch {
+          throw new Error(
+            "The pending personnel reference is invalid. Please sign in again.",
+          );
+        }
+
+        console.log("MFA DEBUG: Pending personnel ID exists:", !!pendingUser.id);
+
+        if (!pendingUser.id) {
+          throw new Error(
+            "Pending login is missing the personnel ID. Please sign in again.",
+          );
+        }
+
+        pendingEmail = pendingUser.email ?? "";
+
+        if (!personnel) {
+          // Retrieve the full personnel profile from Supabase.
+          console.log("MFA STEP 7: Fetching personnel profile");
+
+          const pUser = await getPersonnelById(pendingUser.id);
+
+          if (!pUser) {
+            throw new Error(
+              "Unable to retrieve your personnel profile. Please sign in again.",
+            );
+          }
+
+          console.log("MFA STEP 8: Completing login");
+
+          await completeLogin(pUser, pendingEmail || pUser.email || "");
+        } else {
+          console.log(
+            "MFA DEBUG: Personnel already loaded; skipping login recovery",
+          );
+        }
+      } else if (!personnel) {
+        // Keep pending-login keys intact so the issue can be diagnosed.
+        throw new Error(
+          "No pending personnel reference or loaded personnel profile was found. Please sign in again.",
+        );
+      } else {
+        console.log(
+          "MFA DEBUG: No pending reference needed; personnel is already loaded",
+        );
+      }
+
+      // Clear pending keys only after profile recovery succeeds
+      // or when a personnel profile is already available.
+      console.log("MFA STEP 9: Clearing pending-login keys");
+
+      await AsyncStorage.multiRemove([
+        PENDING_MFA_USER_ID_KEY,
+        PENDING_MFA_PERSONNEL_KEY,
+      ]);
+
+      console.log("MFA STEP 10: MFA setup completed");
+
       Alert.alert(
         "MFA Secured",
-        "Supabase Multi-Factor Authentication (MFA) has been successfully verified and active for your officer profile!",
+        "Multi-Factor Authentication has been verified and is now active for your officer profile.",
       );
 
       return true;
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      const message =
+        e instanceof Error ? e.message : "An error occurred while enabling MFA.";
 
-      Alert.alert(
-        "Setup Error",
-        "An error occurred while enabling Supabase MFA.",
-      );
+      console.error("enable2FA failed:", message, e);
+
+      Alert.alert("Setup Error", message);
 
       return false;
     }
   };
+
+
 
   // ============================================================
   // DISABLE 2FA
@@ -1129,10 +1328,17 @@ export const usePatrolState = () => {
     try {
       const personnelIdKey = personnel.id;
 
-      const factorId =
-        (await AsyncStorage.getItem(
-          `@pnp_supabase_mfa_factor_id_${personnelIdKey}`,
-        )) ?? "";
+      // Ask the server which factor is active instead of trusting phone storage
+      const { data, error } = await supabase.auth.mfa.listFactors();
+      if (error) throw error;
+
+      const factorId = (data?.all ?? []).find(
+        (f) => f.factor_type === "totp" && f.status === "verified",
+      )?.id;
+
+      if (!factorId) {
+        throw new Error("No active MFA factor found.");
+      }
 
       await unenrollMFA(factorId);
 
@@ -1158,12 +1364,13 @@ export const usePatrolState = () => {
         "MFA Disabled",
         "Supabase Multi-Factor Authentication (MFA) is now disabled. Warning: Your officer profile is no longer protected by MFA.",
       );
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
 
       Alert.alert(
         "Disable Error",
-        "An error occurred while disabling Supabase multi-factor authentication.",
+        e?.message ??
+          "An error occurred while disabling Supabase multi-factor authentication.",
       );
     }
   };

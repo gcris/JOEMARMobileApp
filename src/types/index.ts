@@ -21,6 +21,7 @@ export interface Personnel {
   email?: string;
   photo_url?: string; // URL to the personnel's photo in Supabase storage
   fcm_token: string;
+  user_id?: string; // References auth.users.id; NULL for legacy accounts until backfilled
 }
 
 export interface Unit {

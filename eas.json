@@ -1,26 +1,24 @@
 {
   "cli": {
-    "version": ">= 10.0.0"
+    "version": ">= 10.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "environment": "development",
+      "android": { "buildType": "apk" }
     },
     "preview": {
-      "android": {
-        "buildType": "apk"
-      }
+      "distribution": "internal",
+      "environment": "preview",
+      "android": { "buildType": "apk" }
     },
     "production": {
-      "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://wxqbngmfovgqpyboriru.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_tFIjf-pGREoOalDqo4JwAQ_8VfPK1Tu",
-        "EXPO_PUBLIC_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4cWJuZ21mb3ZncXB5Ym9yaXJ1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDA1MTIwNywiZXhwIjoyMDk1NjI3MjA3fQ.ryKi99eK7QGFsEe3LRkhp67HT4pJtUQ165OivJW10jk"
-      },
-      "android": {
-        "gradleCommand": ":app:assembleRelease"
-      }
+      "environment": "production",
+      "autoIncrement": true,
+      "android": { "buildType": "app-bundle" }
     }
   },
   "submit": {

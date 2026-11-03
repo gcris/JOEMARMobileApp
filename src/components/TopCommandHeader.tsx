@@ -20,8 +20,8 @@ export const TopCommandHeader = ({
 
   const handleLogoutPress = () => {
     Alert.alert("Sign out", "Are you sure you want to sign out?", [
-      { text: "Confirm", style: "destructive", onPress: onLogout },
       { text: "Cancel", style: "cancel" },
+      { text: "Confirm", style: "destructive", onPress: onLogout },
     ]);
   };
 

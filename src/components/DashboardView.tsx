@@ -99,7 +99,7 @@ export const DashboardView = ({
   >("home");
 
   const [selectedDutyType, setSelectedDutyType] =
-    useState<string>("Foot Patrolling");
+    useState<string>(activeDutyType || "Foot Patrolling");
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -305,14 +305,14 @@ export const DashboardView = ({
           {/* ================================================================ */}
 
           <View
+            ref={headerRef}
             style={{
               flexDirection: "row",
               alignItems: "center",
               marginBottom: 18,
             }}
           >
-              <View
-                ref={headerRef}
+            <View
               style={{
                 flex: 1,
                 marginLeft: 13,
@@ -350,31 +350,31 @@ export const DashboardView = ({
 
           {activeNav === "home" && (
             <View style={localStyles.mainContent}>
-
               {/* ------------------------------------------------------------ */}
               {/* PERMISSIONS                                                   */}
               {/* ------------------------------------------------------------ */}
 
-              {!showOnboarding && (!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
-                <PermissionView
-                  foregroundGranted={foregroundGranted}
-                  backgroundGranted={backgroundGranted}
-                  isGpsEnabled={isGpsEnabled}
-                  isDarkTheme={isDarkTheme}
-                  onRequestForeground={onRequestForeground}
-                  onRequestBackground={onRequestBackground}
-                  onEnableGpsInline={onEnableGpsInline}
-                  onOpenSettings={onOpenSettings}
-                  gpsLoading={false}
-                />
-              )}
+              {!showOnboarding &&
+                (!foregroundGranted || !backgroundGranted || !isGpsEnabled) && (
+                  <PermissionView
+                    foregroundGranted={foregroundGranted}
+                    backgroundGranted={backgroundGranted}
+                    isGpsEnabled={isGpsEnabled}
+                    isDarkTheme={isDarkTheme}
+                    onRequestForeground={onRequestForeground}
+                    onRequestBackground={onRequestBackground}
+                    onEnableGpsInline={onEnableGpsInline}
+                    onOpenSettings={onOpenSettings}
+                    gpsLoading={false}
+                  />
+                )}
 
               {/* ------------------------------------------------------------ */}
               {/* PATROL TRACKER                                                */}
               {/* ------------------------------------------------------------ */}
 
-                <View
-                  ref={patrolTrackerRef}
+              <View
+                ref={patrolTrackerRef}
                 style={[
                   localStyles.trackerCard,
                   {
@@ -413,8 +413,7 @@ export const DashboardView = ({
                     />
                   </View>
 
-                    <View 
-                      style={{ flex: 1 }}>
+                  <View style={{ flex: 1 }}>
                     <Text
                       style={[
                         localStyles.sectionTitle,
@@ -518,10 +517,13 @@ export const DashboardView = ({
                     },
                   ]}
                 >
-                  PATROL DUTY TYPE
+                  PATROL ACTIVITY
                 </Text>
 
-                <View ref={dutyDropdownWrapperRef} style={localStyles.dutyDropdownWrapper}>
+                <View
+                  ref={dutyDropdownWrapperRef}
+                  style={localStyles.dutyDropdownWrapper}
+                >
                   {/* SELECTED DUTY BUTTON */}
 
                   <TouchableOpacity
@@ -570,7 +572,7 @@ export const DashboardView = ({
                             },
                           ]}
                         >
-                          SELECTED DUTY
+                          SELECTED ACTIVITY
                         </Text>
 
                         <Text
