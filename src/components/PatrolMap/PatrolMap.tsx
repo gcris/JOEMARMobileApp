@@ -7,14 +7,12 @@ import {
   ShapeSource,
   CircleLayer,
   LineLayer,
-  setAccessToken,
 } from "@maplibre/maplibre-react-native";
-import Constants from 'expo-constants';
 
-// Use environment variable for style URL or fall back to Mapbox Streets
+// CartoDB Positron style — free, public, no API key required
 const MAP_STYLE_URL =
   process.env.EXPO_PUBLIC_MAP_STYLE_URL ||
-  "mapbox://styles/mapbox/streets-v12";
+  "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
 interface PatrolMapProps {
   children?: React.ReactNode;
@@ -30,14 +28,6 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({
   style
 }) => {
   const cameraRef = useRef<CameraRef>(null);
-
-  // Set Mapbox access token for authentication with tile server
-  useEffect(() => {
-    const mapboxKey = process.env.MAPBOX_API_KEY;
-    if (mapboxKey) {
-      setAccessToken(mapboxKey);
-    }
-  }, []);
 
   return (
     <View style={[StyleSheet.absoluteFill, style]}>

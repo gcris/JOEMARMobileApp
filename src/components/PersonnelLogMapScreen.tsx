@@ -18,10 +18,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { PersonnelLog } from "../types";
 
-// Using public MapLibre demo tiles — requires zero API keys or tokens
+// CartoDB Positron style — free, public, no API key required
+// Alternative: https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json
 const MAP_STYLE_URL =
   process.env.EXPO_PUBLIC_MAP_STYLE_URL ||
-  "https://demotiles.maplibre.org/style.json";
+  "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
 interface PersonnelLogMapScreenProps {
   logs: PersonnelLog[];
