@@ -193,45 +193,6 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
     return 2 * R * Math.asin(Math.sqrt(h));
   };
 
-  // Simplify route coordinates using Douglas-Peucker algorithm
-  // Reduces point count while preserving overall shape
-  const simplifyCoordinates = (
-    coords: { latitude: number; longitude: number }[],
-    toleranceMeters: number = 5,
-  ): { latitude: number; longitude: number }[] => {
-    if (coords.length <= 2) return coords;
-
-    const toleranceKm = toleranceMeters / 1000;
-    const [first, ...rest] = coords;
-    const last = rest[rest.length - 1];
-
-    let maxDist = 0;
-    let maxIndex = 0;
-
-    for (let i = 1; i < rest.length; i++) {
-      const dist = distanceKm(first, rest[i]) + distanceKm(rest[i], last);
-      // Check perpendicular distance from line
-      const lineDist = distanceKm(first, last);
-      if (lineDist > 0) {
-        const pointDist = distanceKm(first, rest[i]);
-        // Simple heuristic: keep points that deviate significantly
-        if (pointDist > toleranceKm) {
-          maxDist = pointDist;
-          maxIndex = i;
-        }
-      }
-    }
-
-    if (maxDist === 0) {
-      return [first, last];
-    }
-
-    const left = simplifyCoordinates(coords.slice(0, maxIndex + 1), toleranceMeters);
-    const right = simplifyCoordinates(coords.slice(maxIndex), toleranceMeters);
-
-    return [...left.slice(0, -1), ...right];
-  };
-
   // Filter out GPS noise: remove points that are too close together
   const filteredLogs = useMemo(() => {
     if (selectedLogs.length < 2) return selectedLogs;
@@ -241,13 +202,13 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
 
     for (let i = 1; i < selectedLogs.length; i++) {
       const currentLog = selectedLogs[i];
-      const dist = distanceKm(
+      const segmentKm = distanceKm(
         { latitude: Number(lastValidLog.latitude), longitude: Number(lastValidLog.longitude) },
         { latitude: Number(currentLog.latitude), longitude: Number(currentLog.longitude) },
       );
 
       // Keep point if it's more than 5 meters away from last valid point
-      if (dist * 1000 >= MIN_SEGMENT_METERS) {
+      if (segmentKm * 1000 >= MIN_SEGMENT_METERS) {
         filtered.push(currentLog);
         lastValidLog = currentLog;
       }
