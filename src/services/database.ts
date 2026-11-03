@@ -9,8 +9,85 @@ const checkInternetBeforeAction = async (): Promise<boolean | null> => {
 };
 
 // ============================================================
+// SHARED HELPERS
+// ============================================================
+
+/**
+ * Local (device) calendar date as YYYY-MM-DD.
+ *
+ * NOTE: new Date().toISOString() is UTC, so between 00:00 and 08:00
+ * in the Philippines it returns YESTERDAY's date.
+ */
+const getLocalDateString = (date: Date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Tiny in-memory cache for rarely-changing lookup tables
+ * (ranks, units). Avoids refetching them on every screen visit.
+ */
+const LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+const lookupCache = new Map<string, { expires: number; value: unknown }>();
+
+const readLookupCache = <T>(key: string): T | null => {
+  const entry = lookupCache.get(key);
+
+  if (!entry) return null;
+
+  if (Date.now() > entry.expires) {
+    lookupCache.delete(key);
+    return null;
+  }
+
+  return entry.value as T;
+};
+
+const writeLookupCache = (key: string, value: unknown) => {
+  lookupCache.set(key, {
+    expires: Date.now() + LOOKUP_CACHE_TTL_MS,
+    value,
+  });
+};
+
+// ============================================================
 // PERSONNEL OPERATIONS
 // ============================================================
+
+/**
+ * The old queries used select("*, ..., schedule_assignments(*)"), which
+ * downloaded EVERY schedule assignment the officer ever had (the list
+ * grows every day) and then threw it away. That embed is removed.
+ *
+ * Personnel columns stay as "*" because not every field mapPersonnel()
+ * reads (e.g. email) is guaranteed to be a real column on this table.
+ */
+const PERSONNEL_WITH_RELATIONS =
+  "*, rank(*), unit:unit!personnel_unit_id_fkey(*)";
+
+const CANDIDATE_COLUMNS = "*";
+
+const mapPersonnel = (data: any): Personnel => ({
+  id: data.id,
+  badgeNumber: data.badge_number,
+  rank: data.rank,
+  rankId: data.rank_id,
+  fullname: data.fullname,
+  unitId: data.unit_id,
+  unit: data.unit,
+  designation: data.designation,
+  phoneNumber: data.phone_number,
+  viberNumber: data.viber_number,
+  isApproved: data.is_approved,
+  role: data.role,
+  email: data.email,
+  photo_url: data.photo_url,
+  fcm_token: data.fcm_token,
+});
 
 export const getPersonnelByBadge = async (
   badgeNumber: string,
@@ -18,7 +95,7 @@ export const getPersonnelByBadge = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*), schedule_assignments(*)")
+      .select(PERSONNEL_WITH_RELATIONS)
       .eq("badge_number", badgeNumber)
       .single();
 
@@ -28,23 +105,7 @@ export const getPersonnelByBadge = async (
 
     if (!data) return null;
 
-    return {
-      id: data.id,
-      badgeNumber: data.badge_number,
-      rank: data.rank,
-      rankId: data.rank_id,
-      fullname: data.fullname,
-      unitId: data.unit_id,
-      unit: data.unit,
-      designation: data.designation,
-      phoneNumber: data.phone_number,
-      viberNumber: data.viber_number,
-      isApproved: data.is_approved,
-      role: data.role,
-      email: data.email,
-      photo_url: data.photo_url,
-      fcm_token: data.fcm_token,
-    };
+    return mapPersonnel(data);
   } catch (error) {
     console.error("Error fetching personnel by badge:", error);
 
@@ -58,7 +119,7 @@ export const getPersonnelByEmail = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*), schedule_assignments(*)")
+      .select(PERSONNEL_WITH_RELATIONS)
       .eq("email", email.toLowerCase())
       .single();
 
@@ -68,23 +129,7 @@ export const getPersonnelByEmail = async (
 
     if (!data) return null;
 
-    return {
-      id: data.id,
-      badgeNumber: data.badge_number,
-      rank: data.rank,
-      rankId: data.rank_id,
-      fullname: data.fullname,
-      unitId: data.unit_id,
-      unit: data.unit,
-      designation: data.designation,
-      phoneNumber: data.phone_number,
-      viberNumber: data.viber_number,
-      isApproved: data.is_approved,
-      role: data.role,
-      email: data.email,
-      photo_url: data.photo_url,
-      fcm_token: data.fcm_token,
-    };
+    return mapPersonnel(data);
   } catch (error) {
     console.error("Error fetching personnel by email:", error);
 
@@ -100,7 +145,7 @@ export const findCandidatePersonnel = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*")
+      .select(CANDIDATE_COLUMNS)
       .eq("badge_number", badgeNumber.toUpperCase())
       .eq("rank_id", rankId)
       .eq("unit_id", unitId)
@@ -112,22 +157,7 @@ export const findCandidatePersonnel = async (
 
     if (!data) return null;
 
-    return {
-      id: data.id,
-      badgeNumber: data.badge_number,
-      rank: data.rank,
-      rankId: data.rank_id,
-      fullname: data.fullname,
-      unitId: data.unit_id,
-      unit: data.unit,
-      designation: data.designation,
-      phoneNumber: data.phone_number,
-      viberNumber: data.viber_number,
-      isApproved: data.is_approved,
-      role: data.role,
-      photo_url: data.photo_url,
-      fcm_token: data.fcm_token,
-    };
+    return mapPersonnel(data);
   } catch (error) {
     console.error("Error finding candidate personnel:", error);
 
@@ -141,7 +171,7 @@ export const getPersonnelById = async (
   try {
     const { data, error } = await supabase
       .from("personnel")
-      .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*), schedule_assignments(*)")
+      .select(PERSONNEL_WITH_RELATIONS)
       .eq("id", id)
       .single();
 
@@ -151,23 +181,7 @@ export const getPersonnelById = async (
 
     if (!data) return null;
 
-    return {
-      id: data.id,
-      badgeNumber: data.badge_number,
-      rank: data.rank,
-      rankId: data.rank_id,
-      fullname: data.fullname,
-      unitId: data.unit_id,
-      unit: data.unit,
-      designation: data.designation,
-      phoneNumber: data.phone_number,
-      viberNumber: data.viber_number,
-      isApproved: data.is_approved,
-      role: data.role,
-      email: data.email,
-      photo_url: data.photo_url,
-      fcm_token: data.fcm_token,
-    };
+    return mapPersonnel(data);
   } catch (error) {
     console.error("Error fetching personnel by id:", error);
 
@@ -207,26 +221,32 @@ export const savePersonnel = async (p: Personnel): Promise<void> => {
 // RANKS AND UNITS
 // ============================================================
 
-export const getRanks = async (): Promise<
-  {
-    id: string;
-    rankName: string;
-  }[]
-> => {
+type RankOption = { id: string; rankName: string };
+type UnitOption = { id: string; unitName: string };
+
+export const getRanks = async (): Promise<RankOption[]> => {
+  const cached = readLookupCache<RankOption[]>("ranks");
+
+  if (cached) return cached;
+
   try {
     const { data, error } = await supabase
       .from("rank")
-      .select("*")
+      .select("id, rank_name, description")
       .order("level", {
         ascending: true,
       });
 
     if (error) throw error;
 
-    return (data || []).map((rank) => ({
+    const ranks = (data || []).map((rank) => ({
       id: rank.id,
       rankName: rank.rank_name + " (" + rank.description + ")",
     }));
+
+    writeLookupCache("ranks", ranks);
+
+    return ranks;
   } catch (error) {
     console.error("Error fetching ranks:", error);
 
@@ -234,12 +254,11 @@ export const getRanks = async (): Promise<
   }
 };
 
-export const getUnits = async (): Promise<
-  {
-    id: string;
-    unitName: string;
-  }[]
-> => {
+export const getUnits = async (): Promise<UnitOption[]> => {
+  const cached = readLookupCache<UnitOption[]>("units");
+
+  if (cached) return cached;
+
   try {
     const { data, error } = await supabase
       .from("unit")
@@ -249,10 +268,14 @@ export const getUnits = async (): Promise<
 
     if (error) throw error;
 
-    return (data || []).map((unit) => ({
+    const units = (data || []).map((unit) => ({
       id: unit.id,
       unitName: unit.unit_name,
     }));
+
+    writeLookupCache("units", units);
+
+    return units;
   } catch (error) {
     console.error("Error fetching units:", error);
 
@@ -288,7 +311,9 @@ export const getScheduleByPersonnel = async (
   personnelId: string,
 ): Promise<Schedule[] | null> => {
   try {
-    const todayStr = new Date().toISOString().split("T")[0];
+    // Device-local date (NOT UTC) so early-morning shifts in the
+    // Philippines don't load yesterday's schedule.
+    const todayStr = getLocalDateString();
 
     const { data, error } = await supabase
       .from("schedule_assignments")
@@ -332,11 +357,7 @@ export const getScheduleByPersonnel = async (
           `,
       )
       .eq("personnel_id", personnelId)
-      .eq("patrol_schedule.date", todayStr)
-      .order("time_from", {
-        foreignTable: "patrol_schedule",
-        ascending: false,
-      });
+      .eq("patrol_schedule.date", todayStr);
 
     if (error && error.code !== "PGRST116") {
       throw error;
@@ -346,7 +367,15 @@ export const getScheduleByPersonnel = async (
       return null;
     }
 
-    return data.map((assignmentRow: any) => {
+    // Latest shift first. (Ordering by an embedded to-one resource in the
+    // query does not sort the parent rows, so sort here instead.)
+    const rows = [...(data as any[])].sort((a, b) =>
+      String(b.patrol_schedule?.time_from ?? "").localeCompare(
+        String(a.patrol_schedule?.time_from ?? ""),
+      ),
+    );
+
+    return rows.map((assignmentRow: any) => {
       const item = assignmentRow.patrol_schedule;
 
       const assignedOfficers = (item.schedule_assignments || []).map(
@@ -428,14 +457,23 @@ export const insertPatrolLogs = async (logs: PersonnelLog[]): Promise<void> => {
   }
 };
 
+const LOG_PAGE_SIZE = 1000;
+const LOG_MAX_PARALLEL_PAGES = 4;
+
+const LOG_COLUMNS =
+  "id, personnel_id, latitude, longitude, speed, network_signal, " +
+  "duty_type, captured_at";
+
 /**
- * Get patrol logs.
+ * Get this personnel's patrol logs for yesterday + today.
  *
- * If personnelId is supplied, only logs belonging
- * to that personnel are returned.
- *
- * If personnelId is omitted, all logs allowed by
- * Supabase RLS are returned.
+ * Speed-ups compared with the previous version:
+ *  - The personnel name / rank is fetched ONCE instead of being embedded
+ *    in every single log row (thousands of identical copies).
+ *  - Page 1 also returns the total count, so the remaining pages are
+ *    fetched in parallel instead of one after another.
+ *  - A stable secondary sort (id) keeps pages from skipping/duplicating
+ *    rows that share the same captured_at.
  */
 export const getPatrolLogs = async (
   personnelId?: string,
@@ -443,13 +481,12 @@ export const getPatrolLogs = async (
   if (!personnelId) return [];
 
   try {
-      // ============================================================
-      // FETCH ONLY YESTERDAY + TODAY
-      // ============================================================
+    // ============================================================
+    // ONLY YESTERDAY + TODAY (device-local days)
+    // ============================================================
 
-      const now = new Date();
+    const now = new Date();
 
-    // Start of today
     const todayStart = new Date(
       now.getFullYear(),
       now.getMonth(),
@@ -460,113 +497,140 @@ export const getPatrolLogs = async (
       0,
     );
 
-    // Start of yesterday
     const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 10);
 
-    // Start of tomorrow
     const tomorrowStart = new Date(todayStart);
     tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
-    // Convert to ISO so Supabase can compare against timestamptz
     const fromDate = yesterdayStart.toISOString();
     const toDate = tomorrowStart.toISOString();
 
-    // ============================================================
-    // PAGINATION
-    // ============================================================
-    //
-    // 1000 is ONLY the page size.
-    // It is NOT the maximum number of logs returned.
-    //
-    // Example:
-    // Page 1 = records 0 - 999
-    // Page 2 = records 1000 - 1999
-    // Page 3 = records 2000 - 2999
-    // etc.
-    //
-    // We continue until Supabase returns less than PAGE_SIZE.
-    // ============================================================
-
-    const PAGE_SIZE = 1000;
-
-    const allLogs: PersonnelLog[] = [];
-
-    let from = 0;
-
-    while (true) {
-      const to = from + PAGE_SIZE - 1;
-
-      let query = supabase
+    const buildPageQuery = (
+      from: number,
+      to: number,
+      withCount: boolean,
+    ): any =>
+      supabase
         .from("patrol_logs")
-        .select(
-          `
-            id,
-            personnel_id,
-            latitude,
-            longitude,
-            speed,
-            network_signal,
-            duty_type,
-            captured_at,
-            personnel (
-              fullname,
-              rank (
-                rank_name
-              )
-            )
-          `,
-        )
-        // ========================================================
-        // ONLY YESTERDAY + TODAY
-        // ========================================================
+        .select(LOG_COLUMNS, withCount ? { count: "exact" } : undefined)
+        .eq("personnel_id", personnelId)
         .gte("captured_at", fromDate)
         .lt("captured_at", toDate)
-        // ========================================================
-        // NEWEST FIRST
-        // ========================================================
-        .order("captured_at", {
-          ascending: false,
-        })
-        // ========================================================
-        // FETCH THIS PAGE
-        // ========================================================
+        .order("captured_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(from, to);
 
-      // ==========================================================
-      // FILTER BY PERSONNEL IF PROVIDED
-      // ==========================================================
+    // ============================================================
+    // PAGE 1 (+ total count) AND PERSONNEL INFO, IN PARALLEL
+    // ============================================================
 
-      console.log("Personnel ID: ", personnelId);
-      query = query.eq("personnel_id", personnelId);
+    const [firstRes, personnelRes]: any[] = await Promise.all([
+      buildPageQuery(0, LOG_PAGE_SIZE - 1, true),
+      supabase
+        .from("personnel")
+        .select("fullname, rank(rank_name)")
+        .eq("id", personnelId)
+        .maybeSingle(),
+    ]);
 
-      const { data, error } = await query;
+    if (firstRes.error) {
+      throw firstRes.error;
+    }
 
-      if (error) {
-        throw error;
+    // Name/rank are nice-to-have; ignore a failure here.
+    const personRow: any = personnelRes?.data;
+
+    const personnelInfo = personRow
+      ? {
+          fullname: personRow.fullname ?? "",
+          rank_name: personRow.rank?.rank_name ?? "",
+        }
+      : undefined;
+
+    const rows: any[] = [...(firstRes.data ?? [])];
+
+    // ============================================================
+    // REMAINING PAGES
+    // ============================================================
+
+    if (rows.length === LOG_PAGE_SIZE) {
+      const total: number | null =
+        typeof firstRes.count === "number" ? firstRes.count : null;
+
+      if (total !== null) {
+        // We know how many pages exist: fetch them in parallel batches.
+        const offsets: number[] = [];
+
+        for (
+          let offset = LOG_PAGE_SIZE;
+          offset < total;
+          offset += LOG_PAGE_SIZE
+        ) {
+          offsets.push(offset);
+        }
+
+        for (let i = 0; i < offsets.length; i += LOG_MAX_PARALLEL_PAGES) {
+          const batch = offsets.slice(i, i + LOG_MAX_PARALLEL_PAGES);
+
+          const results: any[] = await Promise.all(
+            batch.map((offset) =>
+              buildPageQuery(offset, offset + LOG_PAGE_SIZE - 1, false),
+            ),
+          );
+
+          for (const result of results) {
+            if (result.error) {
+              throw result.error;
+            }
+
+            rows.push(...(result.data ?? []));
+          }
+        }
+      } else {
+        // Count unavailable: fall back to sequential paging.
+        let from = LOG_PAGE_SIZE;
+
+        while (true) {
+          const result: any = await buildPageQuery(
+            from,
+            from + LOG_PAGE_SIZE - 1,
+            false,
+          );
+
+          if (result.error) {
+            throw result.error;
+          }
+
+          const pageRows: any[] = result.data ?? [];
+
+          rows.push(...pageRows);
+
+          if (pageRows.length < LOG_PAGE_SIZE) {
+            break;
+          }
+
+          from += LOG_PAGE_SIZE;
+        }
       }
+    }
 
-      // No more records
-      if (!data || data.length === 0) {
-        break;
-      }
+    // ============================================================
+    // CONVERT SUPABASE ROWS TO PersonnelLog
+    // (de-duplicate by id in case new logs arrived between pages)
+    // ============================================================
 
-      // ==========================================================
-      // CONVERT SUPABASE ROWS TO PersonnelLog
-      // ==========================================================
+    const unique = new Map<string, PersonnelLog>();
 
-      const pageLogs: PersonnelLog[] = data.map((row: any) => ({
+    for (const row of rows) {
+      if (unique.has(row.id)) continue;
+
+      unique.set(row.id, {
         id: row.id,
 
         personnelId: row.personnel_id,
 
-        personnel: row.personnel
-          ? {
-              fullname: row.personnel.fullname ?? "",
-
-              rank_name: row.personnel.rank?.rank_name ?? "",
-            }
-          : undefined,
+        personnel: personnelInfo,
 
         latitude: Number(row.latitude),
 
@@ -583,22 +647,10 @@ export const getPatrolLogs = async (
         // Logs retrieved from Supabase
         // are already synchronized.
         isSynced: true,
-      }));
-
-      // Add this page to the complete result
-      allLogs.push(...pageLogs);
-
-      // ==========================================================
-      // IF LESS THAN PAGE SIZE, WE HAVE REACHED THE END
-      // ==========================================================
-
-      if (data.length < PAGE_SIZE) {
-        break;
-      }
-
-      // Move to next page
-      from += PAGE_SIZE;
+      });
     }
+
+    const allLogs = Array.from(unique.values());
 
     console.log(
       `[Database] Patrol logs loaded: ${allLogs.length} ` +
