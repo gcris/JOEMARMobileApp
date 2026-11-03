@@ -14,14 +14,14 @@ import {
   ShapeSource,
   LineLayer,
   CircleLayer,
-  setAccessToken,
 } from "@maplibre/maplibre-react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { PersonnelLog } from "../types";
 
+// Using public MapLibre demo tiles — requires zero API keys or tokens
 const MAP_STYLE_URL =
   process.env.EXPO_PUBLIC_MAP_STYLE_URL ||
-  "mapbox://styles/mapbox/streets-v12";
+  "https://demotiles.maplibre.org/style.json";
 
 interface PersonnelLogMapScreenProps {
   logs: PersonnelLog[];
@@ -58,13 +58,6 @@ export default function PersonnelLogMapScreen({
   const [selectedSession, setSelectedSession] = useState<string>("all");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
-
-  useEffect(() => {
-    const mapboxKey = process.env.MAPBOX_API_KEY;
-    if (mapboxKey) {
-      setAccessToken(mapboxKey);
-    }
-  }, []);
 
   const formatTime = (date: string) => {
     const parsed = new Date(date);
