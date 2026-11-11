@@ -1,104 +1,161 @@
+
 package com.pnp.geotracker.sync
 
 import android.content.Context
 import android.util.Log
-
-import com.pnp.geotracker.repository.PatrolRepository
-import com.pnp.geotracker.model.PatrolLocation
-import com.pnp.geotracker.model.SupabaseLocation
 import com.pnp.geotracker.network.SupabaseApi
+import com.pnp.geotracker.repository.PatrolRepository
 
-class SyncManager(
-    context: Context
-) {
+class SyncManager(context: Context) {
 
     companion object {
         private const val TAG = "SyncManager"
+        private const val BATCH_SIZE = 100
+
+        // Shared lock across all SyncManager instances.
+        private val syncLock = Any()
     }
 
-    private val repository = PatrolRepository(context)
+    private val repository =
+        PatrolRepository(context.applicationContext)
+
     private val api = SupabaseApi()
 
+    /**
+     * Manual synchronization.
+     * Uploads one batch and returns the number of
+     * successfully uploaded records.
+     */
     fun sync(): Int {
-        Log.d(TAG, "================================")
-        Log.d(TAG, "SYNC STARTED")
+        return synchronized(syncLock) {
 
-        try {
-            val locations = repository.getUnsyncedLocations()
+            Log.d(TAG, "Manual sync started")
 
-            Log.d(TAG, "Pending locations = ${locations.size}")
+            val locations =
+                repository.getUnsyncedLocations(BATCH_SIZE)
 
             if (locations.isEmpty()) {
-                Log.d(TAG, "No pending locations to upload")
-                Log.d(TAG, "SYNC FINISHED")
-                return 0
+                Log.d(TAG, "No pending locations")
+                return@synchronized 0
             }
 
-            // Print each pending location
-            locations.forEachIndexed { index, location ->
-                Log.d(
+            if (locations.any { it.personnelId.isBlank() }) {
+                Log.e(
                     TAG,
-                    """
-                    Location #${index + 1}
-                    ID: ${location.id}
-                    Personnel ID: ${location.personnelId}
-                    Duty Type: ${location.dutyType}
-                    Latitude: ${location.latitude}
-                    Longitude: ${location.longitude}
-                    Accuracy: ${location.accuracy}
-                    Speed: ${location.speed}
-                    Network Signal: ${location.networkSignal}
-                    Timestamp: ${location.timestamp}
-                    """.trimIndent()
+                    "Sync stopped: batch contains an empty personnel ID"
                 )
+                return@synchronized 0
             }
 
-            Log.d(TAG, "Uploading ${locations.size} locations to Supabase...")
+            try {
+                val success = api.upload(locations)
 
-            val success = api.upload(locations)
-
-            Log.d(TAG, "Upload result = $success")
-
-            if (success) {
-                Log.d(TAG, "Marking locations as synced...")
+                if (!success) {
+                    Log.e(
+                        TAG,
+                        "Upload failed; records remain pending"
+                    )
+                    return@synchronized 0
+                }
 
                 repository.markAsSynced(
                     locations.map { it.id }
                 )
 
-                Log.d(
+                Log.i(
                     TAG,
-                    "Successfully uploaded and marked ${locations.size} locations as synced"
+                    "Manual sync uploaded ${locations.size} locations"
                 )
-            } else {
-                Log.e(TAG, "Upload failed; locations remain pending")
+
+                locations.size
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Manual sync failed", e)
+                0
             }
-
-            Log.d(TAG, "SYNC FINISHED")
-
-            return locations.size
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error during sync", e)
-            return 0
         }
     }
 
-    private fun convert(
-        location: PatrolLocation
-    ): SupabaseLocation {
+    /**
+     * WorkManager synchronization.
+     * Continues uploading batches until the local
+     * unsynced queue is empty.
+     *
+     * true  = all pending records uploaded
+     * false = an upload failed or invalid records exist
+     */
+    fun syncPendingAll(): Boolean {
+        return synchronized(syncLock) {
 
-        Log.d(TAG, "Converting location ID=${location.id}")
+            Log.i(TAG, "Background sync started")
 
-        return SupabaseLocation(
-            personnel_id = location.personnelId,
-            duty_type = location.dutyType,
-            latitude = location.latitude,
-            longitude = location.longitude,
-            accuracy = location.accuracy,
-            speed = location.speed,
-            network_signal = location.networkSignal,
-            captured_at = location.timestamp
-        )
+            var totalUploaded = 0
+
+            try {
+                while (true) {
+
+                    val locations =
+                        repository.getUnsyncedLocations(BATCH_SIZE)
+
+                    // No more pending records.
+                    if (locations.isEmpty()) {
+                        Log.i(
+                            TAG,
+                            "Background sync completed. " +
+                                "Total uploaded: $totalUploaded"
+                        )
+
+                        return@synchronized true
+                    }
+
+                    // Do not upload a partially valid batch.
+                    if (locations.any { it.personnelId.isBlank() }) {
+                        Log.e(
+                            TAG,
+                            "Background sync stopped: " +
+                                "batch contains an empty personnel ID"
+                        )
+
+                        return@synchronized false
+                    }
+
+                    Log.d(
+                        TAG,
+                        "Uploading batch of ${locations.size} locations"
+                    )
+
+                    val success = api.upload(locations)
+
+                    if (!success) {
+                        Log.e(
+                            TAG,
+                            "Batch upload failed. " +
+                                "Records remain pending."
+                        )
+
+                        return@synchronized false
+                    }
+
+                    // Only mark records synced after successful upload.
+                    repository.markAsSynced(
+                        locations.map { it.id }
+                    )
+
+                    totalUploaded += locations.size
+
+                    Log.i(
+                        TAG,
+                        "Batch uploaded. Total uploaded: $totalUploaded"
+                    )
+                }
+
+                @Suppress("UNREACHABLE_CODE")
+                true
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Background sync failed", e)
+                false
+            }
+        }
     }
 }

@@ -1,0 +1,5 @@
+appId: com.pnp.geotracker
+---
+- launchApp
+- waitForAnimationToEnd
+- takeScreenshot: patrol-launched

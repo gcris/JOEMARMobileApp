@@ -1,18 +1,14 @@
 package com.pnp.geotracker.repository
 
 import android.content.Context
-
 import com.pnp.geotracker.database.PatrolDatabase
 import com.pnp.geotracker.model.PatrolLocation
 
-class PatrolRepository(
-    context: Context
-) {
+class PatrolRepository(context: Context) {
 
-    private val database = PatrolDatabase(context)
+    private val database = PatrolDatabase(context.applicationContext)
 
     fun saveLocation(location: PatrolLocation): Long {
-
         return database.insertLocation(location)
     }
 
@@ -20,8 +16,10 @@ class PatrolRepository(
         return database.getLocationCount()
     }
 
-    fun getUnsyncedLocations(): List<PatrolLocation> {
-        return database.getUnsyncedLocations()
+    fun getUnsyncedLocations(
+        limit: Int = 100
+    ): List<PatrolLocation> {
+        return database.getUnsyncedLocations(limit)
     }
 
     fun markAsSynced(ids: List<Long>) {

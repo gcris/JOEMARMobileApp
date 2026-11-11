@@ -14,6 +14,8 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
+import com.pnp.geotracker.signal.SignalStrengthHelper
+
 class SignalStrengthModule(
     reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
@@ -24,64 +26,29 @@ class SignalStrengthModule(
 
     @ReactMethod
     fun getSignalStrength(promise: Promise) {
-
         try {
+            val signal = SignalStrengthHelper.getSignal(
+                reactApplicationContext
+            )
 
-            val telephonyManager =
-                reactApplicationContext.getSystemService(Context.TELEPHONY_SERVICE)
-                        as TelephonyManager
-
-            val cellInfoList: List<CellInfo> =
-                telephonyManager.allCellInfo
-
-            if (cellInfoList.isEmpty()) {
-                promise.reject("NO_SIGNAL", "No cellular signal found.")
+            if (signal == null) {
+                promise.reject(
+                    "NO_SIGNAL",
+                    "Cellular signal unavailable or permission not granted."
+                )
                 return
             }
 
-            val result = Arguments.createMap()
-
-            for (cell in cellInfoList) {
-
-                if (!cell.isRegistered) continue
-
-                when {
-
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                            cell.cellSignalStrength is CellSignalStrengthNr -> {
-
-                        val signal =
-                            cell.cellSignalStrength as CellSignalStrengthNr
-
-                        result.putString("networkType", "5G")
-                        result.putInt("dbm", signal.dbm)
-                        result.putInt("level", signal.level)
-
-                        promise.resolve(result)
-                        return
-                    }
-
-                    cell.cellSignalStrength is CellSignalStrengthLte -> {
-
-                        val signal =
-                            cell.cellSignalStrength as CellSignalStrengthLte
-
-                        result.putString("networkType", "LTE")
-                        result.putInt("dbm", signal.dbm)
-                        result.putInt("level", signal.level)
-
-                        promise.resolve(result)
-                        return
-                    }
-                }
+            val result = Arguments.createMap().apply {
+                putString("networkType", signal.networkType)
+                putInt("dbm", signal.dbm)
+                putInt("level", signal.level)
             }
 
-            promise.reject("NO_SIGNAL", "Registered network not found.")
+            promise.resolve(result)
 
         } catch (e: Exception) {
-
-            promise.reject("ERROR", e.message)
-
+            promise.reject("SIGNAL_ERROR", e.message, e)
         }
     }
 }

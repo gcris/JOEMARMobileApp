@@ -16,24 +16,35 @@ import FontAwesome from "@expo/vector-icons/FontAwesome6";
 import { PermissionView } from "../helper/PermissionView";
 import { ScrollView } from "react-native-gesture-handler";
 import { AccountScreen } from "./AccountScreen";
-import PersonnelLogMapScreen from "./PersonnelLogMapScreen";
 import { PatrolMap } from "./PatrolMap/PatrolMap";
 import PatrolSummaryScreen from "./PatrolSummaryScreen";
 import { OnboardingView, OnboardingTourRef } from "./OnboardingView";
 
 const DUTY_TYPES = [
+  "Police Presence",
   "Foot Patrolling",
   "Mobile Patrolling",
   "TMRU Patrolling",
   "Bike Patrolling",
   "Seaborne Patrolling",
   "Checkpoint",
+  "Oplan Sita",
+  "Oplan Balak/Sita",
+  "Oplan Katok",
+  "Duty Traffic",
   "Special Event",
+  "Meeting",
+  "Seminar (LGU, PPO, Region)",
+  "Court Hearing",
+  "PCR Activities (Radio Guesting, Out Reach Program, etc.)",
+  "Remain in Office",
+  "Shift/Area Supervisor/Team Leader",
+  "CESPO/MESPO",
   "Simulation Exercise",
   "DODON",
   "Intel-Driven Operation",
   "Special Laws",
-  "Combat/Prophylactic Patrolling"
+  "Combat/Prophylactic Patrolling",
 ];
 
 interface DashboardViewProps {

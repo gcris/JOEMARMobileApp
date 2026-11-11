@@ -1,212 +1,618 @@
+
 package com.pnp.geotracker.location
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.Location
-import android.os.Build
 import android.os.HandlerThread
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import com.google.android.gms.location.*
+
+import androidx.core.content.ContextCompat
+
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+
 import com.pnp.geotracker.model.PatrolLocation
 import com.pnp.geotracker.repository.PatrolRepository
+import com.pnp.geotracker.sync.SyncWorker
 import com.pnp.geotracker.signal.SignalStrengthHelper
 
+import kotlin.math.abs
+
 class LocationEngine(
-        private val context: Context,
-        private val dutyType: String,
-        private val personnelId: String
+    context: Context,
+    private val dutyType: String,
+    private val personnelId: String
 ) {
-
-    private val repository = PatrolRepository(context)
-
-    // State is only touched from the single background looper thread,
-    // so no locking is needed.
-    private var lastSavedLocation: Location? = null
-    private var lastSavedElapsedNanos = 0L
-
-    private var handlerThread: HandlerThread? = null
 
     companion object {
         private const val TAG = "LocationEngine"
 
-        // Accuracy gates
-        private const val MAX_ACCURACY_M = 25f // normal fixes
-        private const val HEARTBEAT_MAX_ACCURACY_M = 150f // only when a heartbeat is overdue
+        // GPS update configuration
+        private const val GPS_INTERVAL_MS = 5_000L
+        private const val GPS_MIN_INTERVAL_MS = 3_000L
 
-        // Freshness: reject cached / delayed fixes
-        private const val MAX_FIX_AGE_MS = 20_000L
+        // Location validation
+        private const val MAX_ACCURACY_METERS = 25f
+        private const val HEARTBEAT_MAX_ACCURACY_METERS = 150f
+        private const val MAX_LOCATION_AGE_MS = 20_000L
+        private const val MAX_SPEED_METERS_PER_SECOND = 55f
 
         // Saving rules
-        private const val MOVING_SAVE_INTERVAL_MS = 5_000L
-        private const val MIN_MOVE_M = 8f
-        private const val HEARTBEAT_MS = 3 * 60_000L // well under the 10 min session gap
+        private const val MIN_SAVE_INTERVAL_MS = 5_000L
+        private const val MIN_MOVEMENT_METERS = 8f
+        private const val STATIONARY_INTERVAL_MS = 8 * 60 * 1_000L
+        private const val HEARTBEAT_INTERVAL_MS = 3 * 60 * 1_000L
 
-        // Jump filter: reject teleports between close-in-time fixes
-        private const val MAX_PLAUSIBLE_SPEED_MPS = 55f // ~200 km/h
-        private const val JUMP_CHECK_WINDOW_MS = 60_000L
+        // Movement detection
+        private const val MOVEMENT_SPEED_THRESHOLD = 1.0f
+        private const val STATIONARY_SPEED_THRESHOLD = 0.5f
+
+        private const val DUTY_HIDDEN_INTEL = "Intel-Driven Operation"
+        private const val DUTY_HIDDEN_LAWS = "Special Laws"
+
+        private enum class TrackingMode {
+            MOVING,
+            STATIONARY,
+            OFFICE_DUTY,
+            HIDDEN_DUTY
+        }
     }
 
-    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+    private val appContext: Context = context.applicationContext
 
-    private val locationRequest =
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
-                    .setMinUpdateIntervalMillis(2_000L)
-                    .setMinUpdateDistanceMeters(0f) // never suppress heartbeat callbacks
-                    .setGranularity(Granularity.GRANULARITY_FINE)
-                    // We filter accuracy ourselves, so don't let the system hold fixes back.
-                    .setWaitForAccurateLocation(false)
-                    .build()
+    private val repository = PatrolRepository(appContext)
 
-    private val locationCallback =
-            object : LocationCallback() {
-                override fun onLocationResult(locationResult: LocationResult) {
-                    locationResult.locations.sortedBy { it.elapsedRealtimeNanos }.forEach {
-                        handleLocation(it)
+    private val fusedLocationClient =
+        LocationServices.getFusedLocationProviderClient(appContext)
+
+    private var locationThread: HandlerThread? = null
+    private var isTracking = false
+
+    private var trackingMode = TrackingMode.STATIONARY
+
+    // Prevent processing the same GPS fix more than once.
+    private var lastProcessedElapsedNanos = 0L
+
+    // Last successfully saved location.
+    private var lastSavedLocation: Location? = null
+    private var lastSavedElapsedNanos = 0L
+
+    // Last valid GPS location used for movement detection.
+    private var previousLocation: Location? = null
+
+    // Movement anchor used to avoid saving GPS jitter.
+    private var movementAnchor: Location? = null
+
+    // Last successful database timestamp.
+    private var lastSavedTimestamp = 0L
+
+    // Last heartbeat timestamp.
+    private var lastHeartbeatElapsedNanos = 0L
+
+    private val isHiddenDuty: Boolean
+        get() = dutyType.equals(
+            DUTY_HIDDEN_INTEL,
+            ignoreCase = true
+        ) || dutyType.equals(
+            DUTY_HIDDEN_LAWS,
+            ignoreCase = true
+        )
+
+    private val isOfficeDuty: Boolean
+        get() = dutyType.equals(
+            "Remain in Office",
+            ignoreCase = true
+        )
+
+    private val locationRequest: LocationRequest =
+        LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            GPS_INTERVAL_MS
+        )
+            .setMinUpdateIntervalMillis(GPS_MIN_INTERVAL_MS)
+            .setWaitForAccurateLocation(false)
+            .build()
+
+    private val locationCallback = object : LocationCallback() {
+
+        override fun onLocationResult(result: LocationResult) {
+            super.onLocationResult(result)
+
+            for (location in result.locations) {
+                processLocation(location)
+            }
+        }
+    }
+
+    /**
+     * Starts GPS tracking.
+     */
+    @SuppressLint("MissingPermission")
+    fun startTracking() {
+
+        if (isTracking) {
+            Log.d(TAG, "Tracking already started")
+            return
+        }
+
+        if (personnelId.isBlank()) {
+            Log.e(TAG, "Cannot start tracking: personnel ID is empty")
+            return
+        }
+
+        if (!hasLocationPermission()) {
+            Log.e(TAG, "Location permission not granted")
+            return
+        }
+
+        try {
+            locationThread = HandlerThread(
+                "INPPO_PATROL_LOCATION_THREAD"
+            ).apply {
+                start()
+            }
+
+            val looper = locationThread?.looper ?: Looper.getMainLooper()
+
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest,
+                locationCallback,
+                looper
+            ).addOnSuccessListener {
+                isTracking = true
+
+                Log.i(
+                    TAG,
+                    "GPS tracking started. Duty: $dutyType"
+                )
+            }.addOnFailureListener { exception ->
+                Log.e(
+                    TAG,
+                    "Failed to start GPS tracking",
+                    exception
+                )
+
+                isTracking = false
+                stopLocationThread()
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to initialize GPS tracking", e)
+            isTracking = false
+            stopLocationThread()
+        }
+    }
+
+    /**
+     * Stops GPS tracking and releases the background thread.
+     */
+    fun stopTracking() {
+
+        if (!isTracking && locationThread == null) {
+            return
+        }
+
+        try {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+                .addOnCompleteListener {
+                    Log.i(TAG, "GPS location updates removed")
+                }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error removing GPS updates", e)
+        }
+
+        isTracking = false
+        stopLocationThread()
+
+        Log.i(TAG, "GPS tracking stopped")
+    }
+
+    /**
+     * Releases the GPS background thread.
+     */
+    private fun stopLocationThread() {
+        try {
+            locationThread?.quitSafely()
+            locationThread?.join(1_000L)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping location thread", e)
+        } finally {
+            locationThread = null
+        }
+    }
+
+    /**
+     * Checks location permissions.
+     */
+    private fun hasLocationPermission(): Boolean {
+
+        val fineLocation =
+            ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+        val coarseLocation =
+            ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+        return fineLocation || coarseLocation
+    }
+
+    /**
+     * Main GPS processing pipeline.
+     */
+    private fun processLocation(location: Location) {
+
+        try {
+
+            val nowElapsedNanos = SystemClock.elapsedRealtimeNanos()
+
+            // -------------------------------------------------
+            // 1. Reject duplicate or out-of-order GPS fixes.
+            // -------------------------------------------------
+
+            if (
+                location.elapsedRealtimeNanos <=
+                lastProcessedElapsedNanos
+            ) {
+                Log.d(TAG, "Duplicate or out-of-order GPS fix ignored")
+                return
+            }
+
+            lastProcessedElapsedNanos =
+                location.elapsedRealtimeNanos
+
+            // -------------------------------------------------
+            // 2. Reject invalid coordinates.
+            // -------------------------------------------------
+
+            if (
+                !location.latitude.isFinite() ||
+                !location.longitude.isFinite() ||
+                location.latitude !in -90.0..90.0 ||
+                location.longitude !in -180.0..180.0
+            ) {
+                Log.w(TAG, "Invalid GPS coordinates")
+                return
+            }
+
+            // -------------------------------------------------
+            // 3. Reject mock GPS locations.
+            // -------------------------------------------------
+
+            if (location.isFromMockProvider) {
+                Log.w(TAG, "Mock GPS location ignored")
+                return
+            }
+
+            // -------------------------------------------------
+            // 4. Reject stale GPS locations.
+            // -------------------------------------------------
+
+            val locationAgeMs =
+                (nowElapsedNanos - location.elapsedRealtimeNanos) /
+                    1_000_000L
+
+            if (
+                locationAgeMs < 0 ||
+                locationAgeMs > MAX_LOCATION_AGE_MS
+            ) {
+                Log.d(
+                    TAG,
+                    "Stale GPS location ignored: ${locationAgeMs}ms"
+                )
+                return
+            }
+
+            // -------------------------------------------------
+            // 5. Reject inaccurate GPS fixes.
+            // -------------------------------------------------
+
+            val isHeartbeatDue =
+                lastSavedElapsedNanos == 0L ||
+                (
+                    nowElapsedNanos - lastSavedElapsedNanos
+                ) / 1_000_000L >= HEARTBEAT_INTERVAL_MS
+
+            val maxAllowedAccuracy =
+                if (isHeartbeatDue) {
+                    HEARTBEAT_MAX_ACCURACY_METERS
+                } else {
+                    MAX_ACCURACY_METERS
+                }
+
+            if (
+                !location.hasAccuracy() ||
+                location.accuracy > maxAllowedAccuracy
+            ) {
+                Log.d(
+                    TAG,
+                    "Inaccurate GPS ignored: ${location.accuracy}m"
+                )
+                return
+            }
+
+            // -------------------------------------------------
+            // 6. Detect impossible GPS jumps.
+            // -------------------------------------------------
+
+            val previous = previousLocation
+
+            if (previous != null) {
+
+                val elapsedSeconds =
+                    (
+                        location.elapsedRealtimeNanos -
+                        previous.elapsedRealtimeNanos
+                    ) / 1_000_000_000f
+
+                if (elapsedSeconds > 0f) {
+
+                    val distance =
+                        previous.distanceTo(location)
+
+                    val calculatedSpeed =
+                        distance / elapsedSeconds
+
+                    if (
+                        calculatedSpeed >
+                        MAX_SPEED_METERS_PER_SECOND
+                    ) {
+                        Log.w(
+                            TAG,
+                            "GPS jump rejected: ${calculatedSpeed}m/s"
+                        )
+                        return
                     }
                 }
             }
 
-    private fun handleLocation(location: Location) {
-        // 1. Basic validity
-        if (!location.latitude.isFinite() ||
-                        !location.longitude.isFinite() ||
-                        location.latitude !in -90.0..90.0 ||
-                        location.longitude !in -180.0..180.0 ||
-                        (location.latitude == 0.0 && location.longitude == 0.0) ||
-                        !location.hasAccuracy() ||
-                        !location.accuracy.isFinite()
-        ) {
-            Log.d(TAG, "Rejected: invalid fix")
-            return
-        }
+            // -------------------------------------------------
+            // 7. Update movement detection.
+            // -------------------------------------------------
 
-        // 2. Reject mock locations
-        val isMock =
-                if (Build.VERSION.SDK_INT >= 31) {
-                    location.isMock
-                } else {
-                    @Suppress("DEPRECATION") location.isFromMockProvider
-                }
-        if (isMock) {
-            Log.w(TAG, "Rejected: mock location")
-            return
-        }
+            updateTrackingMode(location)
 
-        // 3. Reject stale / cached fixes (monotonic clock, immune to clock changes)
-        val nowNanos = SystemClock.elapsedRealtimeNanos()
-        val ageMs = (nowNanos - location.elapsedRealtimeNanos) / 1_000_000L
-        if (ageMs > MAX_FIX_AGE_MS) {
-            Log.d(TAG, "Rejected: stale fix (${ageMs / 1000}s old)")
-            return
-        }
+            previousLocation = Location(location)
 
-        // 4. Duplicate / out-of-order check on the monotonic clock
-        if (lastSavedElapsedNanos > 0L && location.elapsedRealtimeNanos <= lastSavedElapsedNanos) {
-            return
-        }
+            // -------------------------------------------------
+            // 8. Apply duty-specific coordinate handling.
+            // -------------------------------------------------
 
-        val previous = lastSavedLocation
-        val elapsedMs =
-                if (previous != null && lastSavedElapsedNanos > 0L) {
-                    (location.elapsedRealtimeNanos - lastSavedElapsedNanos) / 1_000_000L
-                } else {
-                    Long.MAX_VALUE
-                }
+            val latitude: Double
+            val longitude: Double
 
-        // 5. Accuracy gate. A poor fix is allowed only to keep the heartbeat alive,
-        //    so an officer inside a building doesn't look offline or split the session.
-        val heartbeatOverdue = previous != null && elapsedMs >= HEARTBEAT_MS
-        val accuracyLimit = if (heartbeatOverdue) HEARTBEAT_MAX_ACCURACY_M else MAX_ACCURACY_M
-        if (location.accuracy > accuracyLimit) {
-            Log.d(TAG, "Rejected: accuracy=${location.accuracy}m > ${accuracyLimit}m")
-            return
-        }
-        val goodFix = location.accuracy <= MAX_ACCURACY_M
+            if (isHiddenDuty) {
 
-        // 6. Teleport filter (only meaningful for good fixes close in time)
-        val distance = previous?.distanceTo(location) ?: Float.MAX_VALUE
-        if (goodFix && previous != null && elapsedMs in 1 until JUMP_CHECK_WINDOW_MS) {
-            val impliedSpeed = distance / (elapsedMs / 1000f)
-            if (impliedSpeed > MAX_PLAUSIBLE_SPEED_MPS) {
-                Log.w(TAG, "Rejected: jump of ${distance}m in ${elapsedMs / 1000}s")
+                // Save the record, but do not expose actual GPS.
+                latitude = 0.0
+                longitude = 0.0
+
+                trackingMode = TrackingMode.HIDDEN_DUTY
+
+            } else {
+
+                latitude = location.latitude
+                longitude = location.longitude
+            }
+
+            // -------------------------------------------------
+            // 9. Determine whether the location should be saved.
+            // -------------------------------------------------
+
+            if (!shouldSaveLocation(location)) {
                 return
             }
-        }
 
-        // 7. Movement must exceed GPS noise, not just a fixed 5 m
-        val moveThreshold = maxOf(MIN_MOVE_M, location.accuracy)
-        val moving = previous != null && distance >= moveThreshold
+            // -------------------------------------------------
+            // 10. Construct patrol record.
+            // -------------------------------------------------
 
-        val shouldSave =
-                previous == null ||
-                        (moving && elapsedMs >= MOVING_SAVE_INTERVAL_MS) ||
-                        heartbeatOverdue
+            val patrolLocation = PatrolLocation(
+                personnelId = personnelId,
+                dutyType = dutyType,
+                latitude = latitude,
+                longitude = longitude,
+                accuracy = if (trackingMode == TrackingMode.HIDDEN_DUTY) 0f else location.accuracy,
+                speed = if (trackingMode == TrackingMode.HIDDEN_DUTY) 0f else location.speed,
+                networkSignal = SignalStrengthHelper.getSignalLevel(appContext),
+                altitude = if (trackingMode == TrackingMode.HIDDEN_DUTY) 0.0 else location.altitude,
+                bearing = if (trackingMode == TrackingMode.HIDDEN_DUTY) 0f else location.bearing,
+                timestamp = System.currentTimeMillis(),
+                synced = false
+            )
 
-        if (!shouldSave) return
-
-        // 8. Save. A signal failure must never cost us the GPS point.
-        val signalLevel =
-                runCatching { SignalStrengthHelper.getSignal(context)?.level }.getOrNull() ?: 0
-
-        try {
-            val patrolLocation =
-                    PatrolLocation(
-                            latitude = location.latitude,
-                            longitude = location.longitude,
-                            dutyType = dutyType,
-                            personnelId = personnelId,
-                            accuracy = location.accuracy, // server can treat > 25 m as low-accuracy
-                            // heartbeat
-                            speed = if (location.hasSpeed()) location.speed else 0f,
-                            networkSignal = signalLevel,
-                            altitude = location.altitude,
-                            bearing = if (location.hasBearing()) location.bearing else 0f,
-                            timestamp =
-                                    if (location.time > 0L) location.time
-                                    else System.currentTimeMillis()
-                    )
+            // -------------------------------------------------
+            // 11. Save locally before attempting synchronization.
+            // -------------------------------------------------
 
             val id = repository.saveLocation(patrolLocation)
 
-            lastSavedLocation = location
-            lastSavedElapsedNanos = location.elapsedRealtimeNanos
+            if (id <= 0L) {
+                Log.e(TAG, "SQLite insert failed")
+                return
+            }
+
+            // -------------------------------------------------
+            // 12. Update state only after successful insertion.
+            // -------------------------------------------------
+
+            lastSavedLocation = Location(location)
+
+            lastSavedElapsedNanos =
+                location.elapsedRealtimeNanos
+
+            lastSavedTimestamp =
+                patrolLocation.timestamp
+
+            lastHeartbeatElapsedNanos =
+                location.elapsedRealtimeNanos
+
+            movementAnchor = Location(location)
 
             Log.d(
-                    TAG,
-                    "Saved #$id | moving=$moving | accuracy=${location.accuracy}m | " +
-                            "distance=${if (previous == null) "n/a" else "${distance}m"} | " +
-                            "elapsed=${if (previous == null) "n/a" else "${elapsedMs / 1000}s"}"
+                TAG,
+                "Patrol location saved locally. Record ID: $id"
             )
+
+            // -------------------------------------------------
+            // 13. Schedule background synchronization.
+            // -------------------------------------------------
+
+            try {
+                SyncWorker.enqueue(appContext)
+
+                Log.d(
+                    TAG,
+                    "Background synchronization scheduled"
+                )
+
+            } catch (e: Exception) {
+                // The local record remains safe.
+                // A later sync request can upload it.
+                Log.e(
+                    TAG,
+                    "Unable to schedule synchronization",
+                    e
+                )
+            }
+
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save patrol location", e)
+            Log.e(TAG, "Error processing GPS location", e)
         }
     }
 
-    @SuppressLint("MissingPermission")
-    @Synchronized
-    fun startTracking() {
-        if (handlerThread != null) return // already running
+    /**
+     * Determines whether the officer is moving or stationary.
+     */
+    private fun updateTrackingMode(location: Location) {
 
-        Log.d(TAG, "Starting GPS tracking...")
+        if (isHiddenDuty) {
+            trackingMode = TrackingMode.HIDDEN_DUTY
+            return
+        }
 
-        // New patrol: don't compare against a point from a previous run.
-        lastSavedLocation = null
-        lastSavedElapsedNanos = 0L
+        if (isOfficeDuty) {
+            trackingMode = TrackingMode.OFFICE_DUTY
+            return
+        }
 
-        // Callbacks (and the blocking save) run off the main thread.
-        val thread = HandlerThread("LocationEngine").also { it.start() }
-        handlerThread = thread
+        val speed = getSpeed(location)
 
-        fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, thread.looper)
+        trackingMode = when {
+            speed >= MOVEMENT_SPEED_THRESHOLD ->
+                TrackingMode.MOVING
+
+            speed <= STATIONARY_SPEED_THRESHOLD ->
+                TrackingMode.STATIONARY
+
+            else ->
+                trackingMode
+        }
     }
 
-    @Synchronized
-    fun stopTracking() {
-        Log.d(TAG, "Stopping GPS tracking...")
+    /**
+     * Determines whether the current GPS fix should be saved.
+     *
+     * Moving:
+     * - Minimum 5 seconds between records.
+     * - Minimum 8 meters of actual displacement.
+     *
+     * Stationary:
+     * - Saves a heartbeat every 8 minutes.
+     *
+     * Office duty:
+     * - Saves a heartbeat every 8 minutes.
+     *
+     * Hidden duty:
+     * - Saves a heartbeat every 8 minutes, with coordinates 0,0.
+     */
+    private fun shouldSaveLocation(location: Location): Boolean {
 
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-        handlerThread?.quitSafely()
-        handlerThread = null
+        val nowElapsedNanos =
+            location.elapsedRealtimeNanos
+
+        val elapsedSinceLastSave =
+            if (lastSavedElapsedNanos == 0L) {
+                Long.MAX_VALUE
+            } else {
+                (
+                    nowElapsedNanos -
+                    lastSavedElapsedNanos
+                ) / 1_000_000L
+            }
+
+        // Always allow the first valid location.
+        if (lastSavedElapsedNanos == 0L) {
+            return true
+        }
+
+        // Moving mode: apply time and distance filters.
+        if (trackingMode == TrackingMode.MOVING) {
+
+            if (elapsedSinceLastSave < MIN_SAVE_INTERVAL_MS) {
+                return false
+            }
+
+            val anchor = movementAnchor ?: lastSavedLocation
+
+            if (anchor == null) {
+                return true
+            }
+
+            val distance =
+                anchor.distanceTo(location)
+
+            if (distance < MIN_MOVEMENT_METERS) {
+                return false
+            }
+
+            return true
+        }
+
+        // Stationary, office, and hidden duty:
+        // save periodic heartbeat records.
+        val heartbeatInterval =
+            when (trackingMode) {
+                TrackingMode.STATIONARY ->
+                    STATIONARY_INTERVAL_MS
+
+                TrackingMode.OFFICE_DUTY ->
+                    STATIONARY_INTERVAL_MS
+
+                TrackingMode.HIDDEN_DUTY ->
+                    STATIONARY_INTERVAL_MS
+
+                TrackingMode.MOVING ->
+                    MIN_SAVE_INTERVAL_MS
+            }
+
+        return elapsedSinceLastSave >= heartbeatInterval
+    }
+
+    /**
+     * Returns GPS speed in meters per second.
+     */
+    private fun getSpeed(location: Location): Float {
+
+        return if (location.hasSpeed()) {
+            location.speed.coerceAtLeast(0f)
+        } else {
+            0f
+        }
     }
 }

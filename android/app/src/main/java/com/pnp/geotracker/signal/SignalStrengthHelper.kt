@@ -1,7 +1,11 @@
+
 package com.pnp.geotracker.signal
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.telephony.CellInfo
 import android.telephony.CellSignalStrengthLte
 import android.telephony.CellSignalStrengthNr
@@ -15,47 +19,81 @@ data class NetworkSignal(
 
 object SignalStrengthHelper {
 
+    private const val CACHE_DURATION_MS = 30_000L
+
+    private var cachedSignal: NetworkSignal? = null
+    private var lastReadTime = 0L
+
+    @Synchronized
     fun getSignal(context: Context): NetworkSignal? {
 
-        val telephonyManager =
-            context.getSystemService(Context.TELEPHONY_SERVICE)
-                    as TelephonyManager
+        val now = SystemClock.elapsedRealtime()
 
-        val cells: List<CellInfo> = telephonyManager.allCellInfo
+        // Reuse the previous reading for 30 seconds.
+        if (now - lastReadTime < CACHE_DURATION_MS) {
+            return cachedSignal
+        }
 
-        for (cell in cells) {
+        val result = try {
 
-            if (!cell.isRegistered) continue
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                context.checkSelfPermission(
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                null
+            } else {
 
-            when {
+                val telephonyManager =
+                    context.applicationContext.getSystemService(
+                        Context.TELEPHONY_SERVICE
+                    ) as? TelephonyManager
 
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                        cell.cellSignalStrength is CellSignalStrengthNr -> {
+                val cells: List<CellInfo> =
+                    telephonyManager?.allCellInfo ?: emptyList()
 
-                    val signal =
-                        cell.cellSignalStrength as CellSignalStrengthNr
-
-                    return NetworkSignal(
-                        "5G",
-                        signal.dbm,
-                        signal.level
-                    )
+                val registeredCell = cells.firstOrNull {
+                    it.isRegistered
                 }
 
-                cell.cellSignalStrength is CellSignalStrengthLte -> {
+                if (registeredCell == null) {
+                    null
+                } else {
 
-                    val signal =
-                        cell.cellSignalStrength as CellSignalStrengthLte
+                    val strength = registeredCell.cellSignalStrength
 
-                    return NetworkSignal(
-                        "LTE",
-                        signal.dbm,
-                        signal.level
+                    val networkType = when {
+
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                            strength is CellSignalStrengthNr -> "5G"
+
+                        strength is CellSignalStrengthLte -> "LTE"
+
+                        else -> "CELLULAR"
+                    }
+
+                    NetworkSignal(
+                        networkType = networkType,
+                        dbm = strength.dbm,
+                        level = strength.level.coerceIn(0, 4)
                     )
                 }
             }
+
+        } catch (e: SecurityException) {
+            null
+        } catch (e: Exception) {
+            null
         }
 
-        return null
+        cachedSignal = result
+        lastReadTime = now
+
+        return result
+    }
+
+    fun getSignalLevel(context: Context): Int {
+        return getSignal(context)?.level ?: -1
     }
 }

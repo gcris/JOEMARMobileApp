@@ -92,8 +92,12 @@ class PatrolDatabase(context: Context) :
         return count
     }
 
-    fun getUnsyncedLocations(): List<PatrolLocation> {
+    fun getUnsyncedLocations(
+        limit: Int = 100
+    ): List<PatrolLocation> {
+
         val locations = mutableListOf<PatrolLocation>()
+
         val cursor = readableDatabase.query(
             TABLE_PATROL_LOGS,
             null,
@@ -101,30 +105,54 @@ class PatrolDatabase(context: Context) :
             arrayOf("0"),
             null,
             null,
-            "timestamp ASC"
+            "timestamp ASC",
+            limit.coerceAtLeast(1).toString()
         )
 
-        while (cursor.moveToNext()) {
-
-            locations.add(
-                PatrolLocation(
-                    id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                    personnelId = cursor.getString(cursor.getColumnIndexOrThrow("personnelId")),
-                    dutyType = cursor.getString(cursor.getColumnIndexOrThrow("dutyType")),
-                    latitude = cursor.getDouble(cursor.getColumnIndexOrThrow("latitude")),
-                    longitude = cursor.getDouble(cursor.getColumnIndexOrThrow("longitude")),
-                    accuracy = cursor.getFloat(cursor.getColumnIndexOrThrow("accuracy")),
-                    speed = cursor.getFloat(cursor.getColumnIndexOrThrow("speed")),
-                    networkSignal = cursor.getInt(cursor.getColumnIndexOrThrow("networkSignal")),
-                    altitude = cursor.getDouble(cursor.getColumnIndexOrThrow("altitude")),
-                    bearing = cursor.getFloat(cursor.getColumnIndexOrThrow("bearing")),
-                    timestamp = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp")),
-                    synced = cursor.getInt(cursor.getColumnIndexOrThrow("synced")) == 1
+        cursor.use {
+            while (it.moveToNext()) {
+                locations.add(
+                    PatrolLocation(
+                        id = it.getLong(
+                            it.getColumnIndexOrThrow("id")
+                        ),
+                        personnelId = it.getString(
+                            it.getColumnIndexOrThrow("personnelId")
+                        ) ?: "",
+                        dutyType = it.getString(
+                            it.getColumnIndexOrThrow("dutyType")
+                        ) ?: "",
+                        latitude = it.getDouble(
+                            it.getColumnIndexOrThrow("latitude")
+                        ),
+                        longitude = it.getDouble(
+                            it.getColumnIndexOrThrow("longitude")
+                        ),
+                        accuracy = it.getFloat(
+                            it.getColumnIndexOrThrow("accuracy")
+                        ),
+                        speed = it.getFloat(
+                            it.getColumnIndexOrThrow("speed")
+                        ),
+                        networkSignal = it.getInt(
+                            it.getColumnIndexOrThrow("networkSignal")
+                        ),
+                        altitude = it.getDouble(
+                            it.getColumnIndexOrThrow("altitude")
+                        ),
+                        bearing = it.getFloat(
+                            it.getColumnIndexOrThrow("bearing")
+                        ),
+                        timestamp = it.getLong(
+                            it.getColumnIndexOrThrow("timestamp")
+                        ),
+                        synced = it.getInt(
+                            it.getColumnIndexOrThrow("synced")
+                        ) == 1
+                    )
                 )
-            )
+            }
         }
-
-        cursor.close()
 
         return locations
     }

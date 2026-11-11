@@ -1,0 +1,26 @@
+
+appId: com.pnp.geotracker
+---
+- launchApp
+
+- waitForAnimationToEnd
+
+# Capture the initial screen
+- takeScreenshot: before-switching
+
+# Press Android Home
+- pressKey: Home
+
+# Wait while the app is in the background
+- waitForAnimationToEnd
+
+- waitForAnimationToEnd
+
+# Return to INPPO PATROL
+- launchApp:
+    stopApp: false
+
+- waitForAnimationToEnd
+
+# Capture the resumed screen
+- takeScreenshot: after-switching

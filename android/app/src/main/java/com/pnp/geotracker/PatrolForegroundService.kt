@@ -3,6 +3,7 @@ package com.pnp.geotracker
 import com.pnp.geotracker.patrol.PatrolManager
 import com.pnp.geotracker.PatrolServiceModule
 import com.pnp.geotracker.sync.SyncManager
+import com.pnp.geotracker.sync.NetworkSyncMonitor
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -21,10 +22,10 @@ import androidx.core.app.NotificationCompat
 class PatrolForegroundService : Service() {
 
     private lateinit var patrolManager: PatrolManager
+    private lateinit var syncManager: SyncManager
+    private lateinit var networkSyncMonitor: NetworkSyncMonitor
 
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var syncManager: SyncManager
-    private val syncing = java.util.concurrent.atomic.AtomicBoolean(false)
 
     companion object {
         const val TAG = "PatrolService"
@@ -36,24 +37,28 @@ class PatrolForegroundService : Service() {
 
         const val ACTION_OPEN_APP =
             "com.pnp.geotracker.OPEN_APP"
+
+        private const val PREFS_NAME = "patrol_session"
+        private const val KEY_DUTY_TYPE = "duty_type"
+        private const val KEY_PERSONNEL_ID = "personnel_id"
     }
 
-    private val syncRunnable = object : Runnable {
-       override fun run() {
-           if (syncing.compareAndSet(false, true)) {
-               Thread {
-                   try {
-                       syncManager.sync()
-                   } catch (e: Exception) {
-                       Log.e(TAG, "Periodic sync failed", e)
-                   } finally {
-                       syncing.set(false)
-                   }
-               }.start()
-           }
-           handler.postDelayed(this, 5_000L)
-       }
-    }
+    // private val syncRunnable = object : Runnable {
+    //    override fun run() {
+    //        if (syncing.compareAndSet(false, true)) {
+    //            Thread {
+    //                try {
+    //                    syncManager.sync()
+    //                } catch (e: Exception) {
+    //                    Log.e(TAG, "Periodic sync failed", e)
+    //                } finally {
+    //                    syncing.set(false)
+    //                }
+    //            }.start()
+    //        }
+    //        handler.postDelayed(this, 5_000L)
+    //    }
+    // }
 
     private val notificationChecker = object : Runnable {
         override fun run() {
@@ -86,8 +91,11 @@ class PatrolForegroundService : Service() {
         createNotificationChannel()
 
         patrolManager = PatrolManager(this)
+        syncManager = SyncManager(this)
+        networkSyncMonitor = NetworkSyncMonitor(this) { syncManager.sync() == 0 }
 
         handler.post(notificationChecker)
+        networkSyncMonitor.start()
 
         Log.d(TAG, "Service created")
     }
@@ -98,58 +106,78 @@ class PatrolForegroundService : Service() {
         startId: Int
     ): Int {
 
-        when (intent?.action) {
+        if (intent?.action == ACTION_STOP_PATROL) {
 
-            ACTION_STOP_PATROL -> {
-                patrolManager.stopPatrol()
+            patrolManager.stopPatrol()
 
-                PatrolServiceModule.sendEvent("PATROL_STOPPED")
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .clear()
+                .apply()
 
-                handler.removeCallbacks(notificationChecker)
+            PatrolServiceModule.sendEvent("PATROL_STOPPED")
 
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+            handler.removeCallbacks(notificationChecker)
 
-                return START_NOT_STICKY
-            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
 
-            ACTION_OPEN_APP -> {
-                // Continue normal notification click handling.
-            }
+            return START_NOT_STICKY
         }
 
-        Log.d(TAG, "Service started")
+        if (intent?.action == ACTION_OPEN_APP) {
+            return START_STICKY
+        }
 
-        val dutyType =
-            intent?.getStringExtra("dutyType") ?: ""
+        val preferences =
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
-        val personnelId =
-            intent?.getStringExtra("personnelId") ?: ""
+        val suppliedDutyType =
+            intent?.getStringExtra("dutyType")
 
-        Log.d(TAG, "Duty Type: $dutyType")
-        Log.d(TAG, "Personnel Id: $personnelId")
+        val suppliedPersonnelId =
+            intent?.getStringExtra("personnelId")
 
-        val notification = createNotification()
+        // Save a newly supplied patrol session.
+        if (!suppliedDutyType.isNullOrBlank() &&
+            !suppliedPersonnelId.isNullOrBlank()
+        ) {
+            preferences.edit()
+                .putString(KEY_DUTY_TYPE, suppliedDutyType)
+                .putString(KEY_PERSONNEL_ID, suppliedPersonnelId)
+                .apply()
+        }
+
+        // Restore the previous patrol session if Android restarted the service.
+        val dutyType = suppliedDutyType
+            ?: preferences.getString(KEY_DUTY_TYPE, null)
+
+        val personnelId = suppliedPersonnelId
+            ?: preferences.getString(KEY_PERSONNEL_ID, null)
+
+        if (dutyType.isNullOrBlank() || personnelId.isNullOrBlank()) {
+            Log.e(TAG, "Cannot restore patrol: missing duty type or personnel ID")
+
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
+        Log.d(TAG, "Starting patrol: $dutyType")
+        Log.d(TAG, "Personnel ID: $personnelId")
 
         startForeground(
             NOTIFICATION_ID,
-            notification
+            createNotification()
         )
 
-        patrolManager.startPatrol(
-            dutyType,
-            personnelId
-        )
-
-        // Automatic Supabase synchronization has been removed.
-        // GPS tracking and local patrol-location saving remain active.
-        // Synchronization should run only when manually requested.
+        patrolManager.startPatrol(dutyType, personnelId)
 
         return START_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(notificationChecker)
+        networkSyncMonitor.stop()
 
         patrolManager.stopPatrol()
 

@@ -503,7 +503,7 @@ export const usePatrolState = () => {
   // ============================================================
 
   const completeLogin = async (pUser: Personnel, emailInput: string) => {
-    console.log("pUser: ", pUser);
+    // console.log("pUser: ", pUser);
     setPersonnel(pUser);
 
     const assignedSched = await getScheduleByPersonnel(pUser.id);
@@ -597,6 +597,8 @@ export const usePatrolState = () => {
         .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*)")
         .eq("user_id", authUser.id)
         .maybeSingle();
+      
+      console.log("if remoteProfile has data: ", remoteProfile !== null);
 
       // Fallback: legacy account where user_id was never populated — id matched auth UUID
       if (!remoteProfile) {
