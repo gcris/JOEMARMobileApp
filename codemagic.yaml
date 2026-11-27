@@ -26,7 +26,10 @@ workflows:
           npx expo prebuild --platform ios --non-interactive
       - name: Install CocoaPods dependencies
         script: |
-          cd ios && pod install
+          cd ios
+          # Update platform :ios, '...' regardless of which version prebuild wrote
+          sed -i '' -E "s/platform :ios, '[0-9.]+'/platform :ios, '15.1'/g" Podfile
+          pod install
       - name: Build unsigned iOS Simulator .app
         script: |
           WORKSPACE=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -n 1)
