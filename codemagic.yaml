@@ -4,10 +4,20 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
-      node: default
+      node: 22
       xcode: latest
       cocoapods: default
     scripts:
+      - name: Create .env file
+        script: |
+          cat <<EOF > .env
+          EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL
+          EXPO_PUBLIC_SUPABASE_ANON_KEY=$EXPO_PUBLIC_SUPABASE_ANON_KEY
+          EXPO_PUBLIC_SERVICE_ROLE_KEY=$EXPO_PUBLIC_SERVICE_ROLE_KEY
+          EXPO_PUBLIC_DISABLE_MFA=$EXPO_PUBLIC_DISABLE_MFA
+          GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY
+          MAPBOX_API_KEY=$MAPBOX_API_KEY
+          EOF
       - name: Install JavaScript dependencies
         script: |
           npm ci || npm install
