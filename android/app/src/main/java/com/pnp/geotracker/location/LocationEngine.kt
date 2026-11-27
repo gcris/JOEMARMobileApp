@@ -35,6 +35,8 @@ class LocationEngine(
     companion object {
         private const val TAG = "LocationEngine"
 
+        private const val INITIAL_MAX_ACCURACY_METERS = 200f
+
         // GPS update configuration
         private const val GPS_INTERVAL_MS = 5_000L
         private const val GPS_MIN_INTERVAL_MS = 3_000L
@@ -73,8 +75,17 @@ class LocationEngine(
     private val fusedLocationClient =
         LocationServices.getFusedLocationProviderClient(appContext)
 
+    @Volatile
     private var locationThread: HandlerThread? = null
+
+    @Volatile
     private var isTracking = false
+
+    @Volatile
+    private var isStopping = false
+
+    @Volatile
+    private var trackingGeneration = 0
 
     private var trackingMode = TrackingMode.STATIONARY
 
@@ -121,25 +132,67 @@ class LocationEngine(
             .setWaitForAccurateLocation(false)
             .build()
 
+    
     private val locationCallback = object : LocationCallback() {
 
         override fun onLocationResult(result: LocationResult) {
             super.onLocationResult(result)
 
+            if (!isTracking || isStopping) {
+                Log.d(TAG, "GPS callback ignored: patrol is stopping or stopped")
+                return
+            }
+
+            Log.i(
+                TAG,
+                "GPS CALLBACK: received ${result.locations.size} location(s)"
+            )
+
+            if (result.locations.isEmpty()) {
+                Log.w(TAG, "GPS CALLBACK: No location received")
+                return
+            }
+
             for (location in result.locations) {
+                val ageMs =
+                    (SystemClock.elapsedRealtimeNanos() -
+                        location.elapsedRealtimeNanos) / 1_000_000L
+
+                Log.i(
+                    TAG,
+                    "GPS FIX: lat=${location.latitude}, " +
+                        "lon=${location.longitude}, " +
+                        "accuracy=${location.accuracy}m, " +
+                        "age=${ageMs}ms, " +
+                        "hasAccuracy=${location.hasAccuracy()}"
+                )
+
                 processLocation(location)
             }
         }
+
+        override fun onLocationAvailability(
+            availability: com.google.android.gms.location.LocationAvailability
+        ) {
+            super.onLocationAvailability(availability)
+
+            Log.i(
+                TAG,
+                "GPS AVAILABLE: ${availability.isLocationAvailable}"
+            )
+        }
     }
+
 
     /**
      * Starts GPS tracking.
      */
     @SuppressLint("MissingPermission")
+    @Synchronized
     fun startTracking() {
 
-        if (isTracking) {
-            Log.d(TAG, "Tracking already started")
+        if (isTracking || isStopping) {
+            Log.d(TAG, "Cannot start: tracking already active or stopping")
             return
         }
 
@@ -153,6 +206,8 @@ class LocationEngine(
             return
         }
 
+        val generation = ++trackingGeneration
+
         try {
             locationThread = HandlerThread(
                 "INPPO_PATROL_LOCATION_THREAD"
@@ -160,33 +215,48 @@ class LocationEngine(
                 start()
             }
 
-            val looper = locationThread?.looper ?: Looper.getMainLooper()
+            val looper = locationThread?.looper
+                ?: Looper.getMainLooper()
+
+            // Mark tracking active before requesting updates.
+            isTracking = true
 
             fusedLocationClient.requestLocationUpdates(
                 locationRequest,
                 locationCallback,
                 looper
             ).addOnSuccessListener {
-                isTracking = true
 
-                Log.i(
-                    TAG,
-                    "GPS tracking started. Duty: $dutyType"
-                )
+                if (
+                    generation != trackingGeneration ||
+                    !isTracking ||
+                    isStopping
+                ) {
+                    Log.w(TAG, "GPS start completed after stop request")
+
+                    fusedLocationClient.removeLocationUpdates(
+                        locationCallback
+                    )
+
+                    return@addOnSuccessListener
+                }
+
+                Log.i(TAG, "GPS tracking started. Duty: $dutyType")
+
             }.addOnFailureListener { exception ->
-                Log.e(
-                    TAG,
-                    "Failed to start GPS tracking",
-                    exception
-                )
 
-                isTracking = false
+                if (generation == trackingGeneration) {
+                    isTracking = false
+                }
+
+                Log.e(TAG, "Failed to start GPS tracking", exception)
+
                 stopLocationThread()
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Unable to initialize GPS tracking", e)
             isTracking = false
+            Log.e(TAG, "Unable to initialize GPS tracking", e)
             stopLocationThread()
         }
     }
@@ -194,26 +264,61 @@ class LocationEngine(
     /**
      * Stops GPS tracking and releases the background thread.
      */
-    fun stopTracking() {
+    @Synchronized
+    fun stopTracking(onComplete: (Boolean) -> Unit) {
 
-        if (!isTracking && locationThread == null) {
+        if (isStopping) {
+            Log.w(TAG, "GPS shutdown is already in progress")
+            onComplete(false)
             return
         }
 
+        if (!isTracking && locationThread == null) {
+            Log.d(TAG, "GPS tracking is already stopped")
+            onComplete(true)
+            return
+        }
+
+        // Immediately prevent additional GPS processing.
+        isStopping = true
+        isTracking = false
+
+        Log.i(TAG, "STOP REQUESTED: removing GPS updates")
+
         try {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
-                .addOnCompleteListener {
-                    Log.i(TAG, "GPS location updates removed")
+            fusedLocationClient
+                .removeLocationUpdates(locationCallback)
+                .addOnCompleteListener { task ->
+
+                    Log.i(
+                        TAG,
+                        "GPS removal completed: success=${task.isSuccessful}"
+                    )
+
+                    stopLocationThread()
+
+                    isStopping = false
+
+                    onComplete(task.isSuccessful)
                 }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error removing GPS updates", e)
+
+            Log.e(TAG, "GPS shutdown failed", e)
+
+            stopLocationThread()
+            isStopping = false
+
+            onComplete(false)
         }
+    }
 
-        isTracking = false
-        stopLocationThread()
-
-        Log.i(TAG, "GPS tracking stopped")
+    // Keep this overload if another part of your application
+    // still calls stopTracking() without a callback.
+    fun stopTracking() {
+        stopTracking { success ->
+            Log.d(TAG, "GPS shutdown result: $success")
+        }
     }
 
     /**
@@ -255,7 +360,13 @@ class LocationEngine(
     /**
      * Main GPS processing pipeline.
      */
+    @Synchronized
     private fun processLocation(location: Location) {
+
+        if (!isTracking || isStopping) {
+            Log.d(TAG, "Location ignored: patrol is no longer active")
+            return
+        }
 
         try {
 
@@ -317,34 +428,41 @@ class LocationEngine(
                 )
                 return
             }
-
+            
             // -------------------------------------------------
-            // 5. Reject inaccurate GPS fixes.
+            // 5. Validate GPS accuracy.
             // -------------------------------------------------
+            val isFirstLocation = lastSavedElapsedNanos == 0L
 
             val isHeartbeatDue =
-                lastSavedElapsedNanos == 0L ||
-                (
-                    nowElapsedNanos - lastSavedElapsedNanos
-                ) / 1_000_000L >= HEARTBEAT_INTERVAL_MS
+                isFirstLocation ||
+                    (nowElapsedNanos - lastSavedElapsedNanos) / 1_000_000L >=
+                    HEARTBEAT_INTERVAL_MS
 
-            val maxAllowedAccuracy =
-                if (isHeartbeatDue) {
-                    HEARTBEAT_MAX_ACCURACY_METERS
-                } else {
-                    MAX_ACCURACY_METERS
-                }
+            val maxAllowedAccuracy = when {
+                isFirstLocation -> INITIAL_MAX_ACCURACY_METERS
+                isHeartbeatDue -> HEARTBEAT_MAX_ACCURACY_METERS
+                else -> MAX_ACCURACY_METERS
+            }
+
+            Log.i(
+                TAG,
+                "SAVE CHECK: first=$isFirstLocation, " +
+                    "accuracy=${location.accuracy}m, " +
+                    "allowed=$maxAllowedAccuracy m"
+            )
 
             if (
                 !location.hasAccuracy() ||
                 location.accuracy > maxAllowedAccuracy
             ) {
-                Log.d(
+                Log.w(
                     TAG,
-                    "Inaccurate GPS ignored: ${location.accuracy}m"
+                    "LOCATION REJECTED: accuracy ${location.accuracy}m"
                 )
                 return
             }
+
 
             // -------------------------------------------------
             // 6. Detect impossible GPS jumps.
@@ -440,7 +558,11 @@ class LocationEngine(
             // 11. Save locally before attempting synchronization.
             // -------------------------------------------------
 
+            Log.i(TAG, "ATTEMPTING SQLITE INSERT: personnelId=$personnelId")
+
             val id = repository.saveLocation(patrolLocation)
+
+            Log.i(TAG, "SQLITE INSERT RESULT: id=$id")
 
             if (id <= 0L) {
                 Log.e(TAG, "SQLite insert failed")

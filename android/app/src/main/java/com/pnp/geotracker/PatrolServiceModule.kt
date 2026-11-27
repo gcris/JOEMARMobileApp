@@ -32,13 +32,26 @@ class PatrolServiceModule(
     companion object {
         lateinit var reactContext: ReactApplicationContext
 
-        fun sendEvent(
-            event: String
-        ) {
+        @Volatile
+        private var pendingStopPromise: Promise? = null
 
+        fun sendEvent(event: String) {
             reactContext
-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .getJSModule(
+                    DeviceEventManagerModule.RCTDeviceEventEmitter::class.java
+                )
                 .emit(event, null)
+        }
+
+        fun completeStop(success: Boolean) {
+
+            val promise = synchronized(this) {
+                val current = pendingStopPromise
+                pendingStopPromise = null
+                current
+            }
+
+            promise?.resolve(success)
         }
     }
 
@@ -104,16 +117,38 @@ class PatrolServiceModule(
 
         try {
 
+            synchronized(Companion) {
+
+                if (pendingStopPromise != null) {
+                    promise.reject(
+                        "STOP_IN_PROGRESS",
+                        "Patrol shutdown is already in progress"
+                    )
+                    return
+                }
+
+                pendingStopPromise = promise
+            }
+
             val intent = Intent(
                 reactApplicationContext,
                 PatrolForegroundService::class.java
-            )
+            ).apply {
+                action = PatrolForegroundService.ACTION_STOP_PATROL
+            }
 
-            reactApplicationContext.stopService(intent)
+            // Send a stop command to the running service.
+            // Do NOT call stopService() directly here.
+            reactApplicationContext.startService(intent)
 
-            promise.resolve(true)
+            Log.i("PatrolService", "Stop request sent to foreground service")
 
         } catch (e: Exception) {
+
+            synchronized(Companion) {
+                pendingStopPromise = null
+            }
+
             promise.reject("STOP_ERROR", e)
         }
     }

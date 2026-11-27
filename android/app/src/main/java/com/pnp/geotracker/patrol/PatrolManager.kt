@@ -1,73 +1,137 @@
-    package com.pnp.geotracker.patrol
 
-    import android.content.Context
-    import android.util.Log
-    import com.pnp.geotracker.location.LocationEngine
+package com.pnp.geotracker.patrol
 
-    class PatrolManager(
-        private val context: Context
+import android.content.Context
+import android.util.Log
+import com.pnp.geotracker.location.LocationEngine
+
+class PatrolManager(
+    private val context: Context
+) {
+
+    companion object {
+
+        private const val TAG = "PatrolManager"
+
+        @Volatile
+        private var running = false
+
+        @Volatile
+        private var dutyType = ""
+
+        @Volatile
+        private var personnelId = ""
+
+        @Volatile
+        private var startedAt: Long = 0
+
+        fun isRunning(): Boolean = running
+
+        fun getDutyType(): String = dutyType
+
+        fun getPersonnelId(): String = personnelId
+
+        fun getStartedAt(): Long = startedAt
+    }
+
+    private var locationEngine: LocationEngine? = null
+    private var stopping = false
+
+    private val pendingStopCallbacks =
+        mutableListOf<(Boolean) -> Unit>()
+
+    @Synchronized
+    fun startPatrol(
+        dutyType: String,
+        personnelId: String
     ) {
 
-        companion object {
-
-            private const val TAG = "PatrolManager"
-
-            private var running = false
-
-            private var dutyType = ""
-
-            private var personnelId = ""
-
-            private var startedAt: Long = 0
-
-            fun isRunning(): Boolean = running
-
-            fun getDutyType(): String = dutyType
-
-            fun getPersonnelId(): String = personnelId
-
-            fun getStartedAt(): Long = startedAt
+        if (locationEngine != null || stopping) {
+            Log.d(TAG, "Patrol already active or stopping")
+            return
         }
 
-        private var locationEngine: LocationEngine? = null
+        Log.d(TAG, "Starting Patrol")
 
-        fun startPatrol(
-            dutyType: String,
-            personnelId: String
-        ) {
+        Companion.dutyType = dutyType
+        Companion.personnelId = personnelId
+        Companion.startedAt = System.currentTimeMillis()
 
-            if (locationEngine != null) {
-                Log.d(TAG, "Patrol already running with an active LocationEngine")
+        locationEngine = LocationEngine(
+            context,
+            dutyType,
+            personnelId
+        )
+
+        Companion.running = true
+
+        locationEngine?.startTracking()
+    }
+
+    fun stopPatrol(
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+
+        val engine: LocationEngine
+
+        synchronized(this) {
+
+            if (stopping) {
+                Log.d(TAG, "Patrol shutdown already in progress")
+                pendingStopCallbacks.add(onComplete)
                 return
             }
 
-            Log.d(TAG, "Starting Patrol")
+            val currentEngine = locationEngine
 
-            Companion.running = true
-            Companion.dutyType = dutyType
-            Companion.personnelId = personnelId
-            Companion.startedAt = System.currentTimeMillis()
+            if (currentEngine == null) {
 
-            locationEngine = LocationEngine(
-                context,
-                dutyType,
-                personnelId
+                Companion.running = false
+                Companion.personnelId = ""
+                Companion.startedAt = 0
+
+                onComplete(true)
+                return
+            }
+
+            stopping = true
+            pendingStopCallbacks.add(onComplete)
+
+            engine = currentEngine
+
+            Log.i(TAG, "Stopping patrol and waiting for GPS shutdown")
+        }
+
+        engine.stopTracking { success ->
+
+            val callbacks: List<(Boolean) -> Unit>
+
+            synchronized(this) {
+
+                locationEngine = null
+
+                Companion.running = false
+                Companion.personnelId = ""
+                Companion.startedAt = 0
+
+                stopping = false
+
+                callbacks = pendingStopCallbacks.toList()
+                pendingStopCallbacks.clear()
+            }
+
+            Log.i(
+                TAG,
+                "Patrol shutdown completed. GPS removal successful=$success"
             )
 
-            locationEngine?.startTracking()
-        }
-
-        fun stopPatrol() {
-
-            Log.d(TAG, "Stopping Patrol")
-
-            locationEngine?.stopTracking()
-
-            locationEngine = null
-
-            Companion.running = false
-            // Keep the last-used duty type so getDutyType() remains accurate after patrol stops.
-            Companion.personnelId = ""
-            Companion.startedAt = 0
+            callbacks.forEach { callback ->
+                try {
+                    callback(success)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Stop callback failed", e)
+                }
+            }
         }
     }
+}

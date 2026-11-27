@@ -89,6 +89,8 @@ export default function App() {
 
   const {
     personnel,
+    isLoading,
+    restoreSession,
     isGpsEnabled,
     foregroundGranted,
     backgroundGranted,
@@ -171,13 +173,45 @@ export default function App() {
   }, [isDarkTheme, themeLoaded]);
 
   // ============================================================
+  // SESSION RESTORATION ON STARTUP
+  // ============================================================
+  // Runs once after theme loads. Waits for `isLoading` to settle so
+  // `personnel` is populated before deciding whether to show LoginView.
+
+  useEffect(() => {
+    if (!themeLoaded) return;
+
+    let mounted = true;
+
+    const attempt = async () => {
+      console.log("[App] Starting session restoration...");
+      const result = await restoreSession();
+      if (!mounted) return;
+      console.log(`[App] restoreSession result: ${result}, isLoading:`, isLoading);
+    };
+
+    attempt();
+
+    return () => {
+      mounted = false;
+    };
+  }, [themeLoaded, restoreSession]);
+
+  // Keep splash visible until session restoration finishes, preventing
+  // a flash of LoginView before we know whether the user is logged in.
+
+  useEffect(() => {
+    if (themeLoaded && !isLoading) {
+      setShowSplash(false);
+    }
+  }, [themeLoaded, isLoading]);
+
+  // ============================================================
   // INITIALIZATION
   // ============================================================
 
   useEffect(() => {
-    if (!themeLoaded) {
-      return;
-    }
+    if (!themeLoaded) return;
 
     setIsInitializing(false);
     setRestoreAttempted(true);
@@ -441,6 +475,7 @@ function MainApp({
         onLogout={logout}
         isDarkTheme={isDarkTheme}
         onToggleTheme={handleToggleTheme}
+        patrolStatus={patrolStatus}
       />
 
       {/* ======================================================

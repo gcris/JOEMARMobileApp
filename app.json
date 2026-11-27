@@ -10,6 +10,7 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "plugins": ["@maplibre/maplibre-react-native"],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pnp.geotracker",
@@ -20,15 +21,10 @@
         "NSCameraUsageDescription": "Camera access is needed to capture profile photos for personnel identification.",
         "NSPhotoLibraryUsageDescription": "Photo library access is required to select existing images for profile photos.",
         "NSMicrophoneUsageDescription": "Microphone access may be used for voice notes during incident reporting.",
-        "UIBackgroundModes": [
-          "location",
-          "remote-notification"
-        ],
+        "UIBackgroundModes": ["location", "remote-notification"],
         "ITSAppUsesNonExemptEncryption": false
       },
-      "associatedDomains": [
-        "applinks:yourdomain.com"
-      ],
+      "associatedDomains": ["applinks:yourdomain.com"],
       "entitlements": {
         "com.apple.developer.location.allows-background-access": true
       }

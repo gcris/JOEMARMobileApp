@@ -27,6 +27,9 @@ class PatrolForegroundService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    @Volatile
+    private var stopInProgress = false
+
     companion object {
         const val TAG = "PatrolService"
         const val CHANNEL_ID = "patrol_tracking"
@@ -108,19 +111,51 @@ class PatrolForegroundService : Service() {
 
         if (intent?.action == ACTION_STOP_PATROL) {
 
-            patrolManager.stopPatrol()
+            if (stopInProgress) {
+                Log.d(TAG, "Patrol shutdown already requested")
+                return START_NOT_STICKY
+            }
 
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .clear()
-                .apply()
+            stopInProgress = true
 
-            PatrolServiceModule.sendEvent("PATROL_STOPPED")
+            Log.i(TAG, "STOP PATROL: waiting for GPS shutdown")
 
+            // Stop periodic notification checking immediately.
             handler.removeCallbacks(notificationChecker)
 
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            patrolManager.stopPatrol { success ->
+
+                Log.i(
+                    TAG,
+                    "PatrolManager shutdown completed: $success"
+                )
+
+                // Clear the saved patrol session only after GPS shutdown.
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .apply()
+
+                // Stop the network monitor, but do not delete
+                // or cancel locally stored unsynchronized records.
+                networkSyncMonitor.stop()
+
+                stopForeground(STOP_FOREGROUND_REMOVE)
+
+                // Notify React Native after GPS shutdown.
+                try {
+                    PatrolServiceModule.sendEvent("PATROL_STOPPED")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Unable to send PATROL_STOPPED event", e)
+                }
+
+                // Resolve any pending React Native stop request.
+                PatrolServiceModule.completeStop(success)
+
+                Log.i(TAG, "PATROL SERVICE SHUTDOWN COMPLETE")
+
+                stopSelf()
+            }
 
             return START_NOT_STICKY
         }

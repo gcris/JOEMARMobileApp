@@ -98,6 +98,11 @@ export const usePatrolState = () => {
 
   const [personnel, setPersonnel] = useState<Personnel | null>(null);
 
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [sessionRestorationAttempted, setSessionRestorationAttempted] =
+    useState(false);
+
   const [schedule, setSchedule] = useState<Schedule[] | null>(null);
 
   // ============================================================
@@ -184,6 +189,133 @@ export const usePatrolState = () => {
   });
 
   // ============================================================
+  // SESSION RESTORATION
+  // ============================================================
+
+  /**
+   * Restores a persisted Supabase session on application startup.
+   * Returns "dashboard" | "mfa" | "pending" | "blocked" | "login" | "error".
+   */
+  const restoreSession = useCallback(async (): Promise<
+    | "dashboard"
+    | "mfa"
+    | "pending"
+    | "blocked"
+    | "login"
+    | "error"
+  > => {
+    if (!isSupabaseConfigured()) {
+      setIsLoading(false);
+      return "login";
+    }
+
+    try {
+      const { data: { session }, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.warn("[Session] getSession error:", sessionError);
+        setIsLoading(false);
+        return "login";
+      }
+
+      if (!session?.user) {
+        setIsLoading(false);
+        return "login";
+      }
+
+      const authUser = session.user;
+
+      let { data: remoteProfile, error: profileErr } = await supabase
+        .from("personnel")
+        .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*)")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+
+      if (!remoteProfile) {
+        const { data: legacyProfile } = await supabase
+          .from("personnel")
+          .select("*, rank(*), unit:unit!personnel_unit_id_fkey(*)")
+          .eq("id", authUser.id)
+          .maybeSingle();
+        remoteProfile = legacyProfile;
+      }
+
+      if (profileErr) throw profileErr;
+
+      if (!remoteProfile) {
+        await supabase.auth.signOut();
+        setIsLoading(false);
+        return "login";
+      }
+
+      const pUser = buildPersonnel(remoteProfile, authUser.email ?? "");
+
+      if (!pUser.isApproved) {
+        setPersonnel(pUser);
+        setIsLoading(false);
+        return "pending";
+      }
+
+      if (remoteProfile.is_blocked) {
+        setPersonnel(pUser);
+        setIsLoading(false);
+        return "blocked";
+      }
+
+      const mfaStatus = await checkMFAStatus(authUser.email ?? "");
+
+      if (!mfaStatus.isEnabled) {
+        await supabase.auth.signOut();
+        await AsyncStorage.removeItem(
+          `@pnp_supabase_mfa_factor_id_${pUser.id}`,
+        );
+        setIsLoading(false);
+        return "login";
+      }
+
+      await AsyncStorage.setItem(PENDING_MFA_USER_ID_KEY, pUser.id);
+      await AsyncStorage.setItem(
+        PENDING_MFA_PERSONNEL_KEY,
+        JSON.stringify({ id: pUser.id, email: pUser.email ?? authUser.email ?? "" }),
+      );
+
+      // Set personnel before returning "mfa" so App.tsx can render the MFA screen
+      // instead of falling back to login with null personnel.
+      setPersonnel(pUser);
+
+      setIsLoading(false);
+      return "mfa";
+    } catch (e: unknown) {
+      console.error("[Session] Restoration failed:", e);
+      setIsLoading(false);
+      return "error";
+    }
+  }, []);
+
+  // ============================================================
+  // COMPLETE LOGIN
+  // ============================================================
+
+  const completeLogin = async (pUser: Personnel, emailInput: string) => {
+    setPersonnel(pUser);
+    const assignedSched = await getScheduleByPersonnel(pUser.id);
+    if (assignedSched) setSchedule(assignedSched);
+    await refreshPatrolStatus();
+    await loadPersonnelLogs(pUser.id);
+    try {
+      const token = await FCMModule.getToken();
+      await supabase
+        .from("personnel")
+        .update({ fcm_token: token, is_online: true })
+        .eq("id", pUser.id);
+      await AsyncStorage.setItem("@pnp_user_name", emailInput);
+    } catch (err) {
+      console.warn("Error: ", err);
+    }
+  };
+
+  // ============================================================
   // LOAD PERSONNEL LOGS
   // ============================================================
 
@@ -219,10 +351,11 @@ export const usePatrolState = () => {
       setPatrolStatus(status);
       setIsShiftActive(status.running);
       setUnsyncedCount(status.unsyncedLocations);
-      // Only update when native side returns a non-empty duty type;
-      // stopPatrol() leaves dutyType intact, so an empty value means
-      // no change from the UI selection and should not overwrite it.
-      if (status.dutyType) {
+      // Only overwrite the UI-selected duty type when the native service
+      // is actively tracking; after stopPatrol() the native side retains the
+      // last-used value indefinitely, so reading it while idle would clobber
+      // any selection the user made offline.
+      if (status.dutyType && status.running) {
         setActiveDutyType(status.dutyType);
       }
     } catch (e) {
@@ -497,42 +630,6 @@ export const usePatrolState = () => {
 
     return active;
   }, [schedule]);
-
-  // ============================================================
-  // COMPLETE LOGIN
-  // ============================================================
-
-  const completeLogin = async (pUser: Personnel, emailInput: string) => {
-    // console.log("pUser: ", pUser);
-    setPersonnel(pUser);
-
-    const assignedSched = await getScheduleByPersonnel(pUser.id);
-
-    if (assignedSched) {
-      setSchedule(assignedSched);
-    }
-
-    await refreshPatrolStatus();
-
-    // Load local patrol logs after login.
-    await loadPersonnelLogs(pUser.id);
-
-    try {
-      const token = await FCMModule.getToken();
-
-      await supabase
-        .from("personnel")
-        .update({
-          fcm_token: token,
-          is_online: true,
-        })
-        .eq("id", pUser.id);
-
-      await AsyncStorage.setItem("@pnp_user_name", emailInput);
-    } catch (err) {
-      console.warn("Error: ", err);
-    }
-  };
 
   // ============================================================
   // LOGIN
@@ -1450,6 +1547,11 @@ const toPendingPersonnel = (pUser: Personnel): Personnel => ({
     // Login / Logout
     login,
     logout,
+
+    // Session restoration
+    restoreSession,
+    isLoading,
+    sessionRestorationAttempted,
 
     // Patrol controls
     toggleShift,

@@ -150,10 +150,13 @@ export const DashboardView = ({
   };
 
   useEffect(() => {
-    if (activeDutyType) {
+    // Only update from parent when the component first mounts or when activeDutyType changes externally,
+    // and never override user selection while they are interacting with the dropdown.
+    if (activeDutyType && activeDutyType !== selectedDutyType && !isShiftActive) {
       setSelectedDutyType(activeDutyType);
     }
   }, [activeDutyType]);
+
   
 
   useEffect(() => {

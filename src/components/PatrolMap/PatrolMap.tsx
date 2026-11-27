@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,13 +11,14 @@ import {
 import {
   MapView,
   Camera,
-  CameraRef,
   ShapeSource,
   LineLayer,
   CircleLayer,
 } from "@maplibre/maplibre-react-native";
+
+import type { CameraRef } from "@maplibre/maplibre-react-native";
+import type { PersonnelLog } from "../../types";
 import { Ionicons } from "@expo/vector-icons";
-import { PersonnelLog } from "../../types";
 
 // CartoDB Positron style — free, public, no API key required
 const MAP_STYLE_URL =
@@ -37,6 +39,101 @@ interface LogSession {
   endTime: string;
   dutyType?: string;
 }
+
+
+const ROUTE_SIMPLIFY_TOLERANCE_METERS = 5;
+
+const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+
+/**
+ * Calculates perpendicular distance from a GPS point to a line segment.
+ * Uses a local meter-based projection suitable for patrol routes.
+ */
+const perpendicularDistanceMeters = (
+  point: PersonnelLog,
+  start: PersonnelLog,
+  end: PersonnelLog,
+): number => {
+  const meanLatitude =
+    (Number(point.latitude) + Number(start.latitude) + Number(end.latitude)) /
+    3;
+
+  const cosLatitude = Math.cos(toRadians(meanLatitude));
+  const earthRadius = 6371000;
+
+  const project = (log: PersonnelLog) => ({
+    x: earthRadius * toRadians(Number(log.longitude)) * cosLatitude,
+    y: earthRadius * toRadians(Number(log.latitude)),
+  });
+
+  const p = project(point);
+  const a = project(start);
+  const b = project(end);
+
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(p.x - a.x, p.y - a.y);
+  }
+
+  const t = Math.max(
+    0,
+    Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)),
+  );
+
+  const nearestX = a.x + t * dx;
+  const nearestY = a.y + t * dy;
+
+  return Math.hypot(p.x - nearestX, p.y - nearestY);
+};
+
+/**
+ * Douglas-Peucker simplification.
+ * Always preserves the first and last GPS points.
+ */
+const simplifyDouglasPeucker = (
+  points: PersonnelLog[],
+  toleranceMeters: number = ROUTE_SIMPLIFY_TOLERANCE_METERS,
+): PersonnelLog[] => {
+  if (points.length < 3) return points;
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+
+  while (stack.length > 0) {
+    const [first, last] = stack.pop()!;
+
+    let maxDistance = 0;
+    let maxIndex = -1;
+
+    for (let i = first + 1; i < last; i++) {
+      const distance = perpendicularDistanceMeters(
+        points[i],
+        points[first],
+        points[last],
+      );
+
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        maxIndex = i;
+      }
+    }
+
+    if (maxDistance > toleranceMeters && maxIndex !== -1) {
+      keep[maxIndex] = 1;
+
+      stack.push([first, maxIndex]);
+      stack.push([maxIndex, last]);
+    }
+  }
+
+  return points.filter((_, index) => keep[index] === 1);
+};
+
 
 export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
   const theme = useMemo(
@@ -59,13 +156,22 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
   const formatTime = (date: string) => {
     const parsed = new Date(date);
     if (Number.isNaN(parsed.getTime())) return "--:--";
-    return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    return parsed.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
   };
 
   const formatDate = (date: string) => {
     const parsed = new Date(date);
     if (Number.isNaN(parsed.getTime())) return "--";
-    return parsed.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+    return parsed.toLocaleDateString([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   };
 
   const getDateKey = (date: string) => {
@@ -85,7 +191,10 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
           Number.isFinite(Number(log.longitude)) &&
           !Number.isNaN(new Date(log.capturedAt).getTime()),
       )
-      .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
+      .sort(
+        (a, b) =>
+          new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+      );
   }, [logs]);
 
   const availableDates = useMemo(() => {
@@ -98,7 +207,9 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
     });
     return Array.from(dateMap.entries())
       .map(([dateKey, dateLogs]) => ({ dateKey, logs: dateLogs }))
-      .sort((a, b) => new Date(b.dateKey).getTime() - new Date(a.dateKey).getTime());
+      .sort(
+        (a, b) => new Date(b.dateKey).getTime() - new Date(a.dateKey).getTime(),
+      );
   }, [sortedLogs]);
 
   useEffect(() => {
@@ -114,7 +225,9 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
 
   const dateLogs = useMemo(() => {
     if (!selectedDate) return [];
-    return sortedLogs.filter((log) => getDateKey(log.capturedAt) === selectedDate);
+    return sortedLogs.filter(
+      (log) => getDateKey(log.capturedAt) === selectedDate,
+    );
   }, [sortedLogs, selectedDate]);
 
   const sessions = useMemo<LogSession[]>(() => {
@@ -141,7 +254,9 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
           sessionNumber,
           logs: currentSession,
           startTime: formatTime(currentSession[0].capturedAt),
-          endTime: formatTime(currentSession[currentSession.length - 1].capturedAt),
+          endTime: formatTime(
+            currentSession[currentSession.length - 1].capturedAt,
+          ),
           dutyType: currentSession[0].dutyType ?? "",
         });
         currentSession = [log];
@@ -158,7 +273,9 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
         sessionNumber,
         logs: currentSession,
         startTime: formatTime(currentSession[0].capturedAt),
-        endTime: formatTime(currentSession[currentSession.length - 1].capturedAt),
+        endTime: formatTime(
+          currentSession[currentSession.length - 1].capturedAt,
+        ),
         dutyType: currentSession[0].dutyType ?? "",
       });
     }
@@ -193,29 +310,114 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
     return 2 * R * Math.asin(Math.sqrt(h));
   };
 
-  // Filter out GPS noise: remove points that are too close together
-  const filteredLogs = useMemo(() => {
-    if (selectedLogs.length < 2) return selectedLogs;
+  // Select the sessions that should be displayed.
+  // Each session is simplified independently.
+  const activeSessions = useMemo(() => {
+    if (selectedSession === "all") return sessions;
 
-    const filtered: PersonnelLog[] = [selectedLogs[0]];
-    let lastValidLog = selectedLogs[0];
+    return sessions.filter((session) => session.id === selectedSession);
+  }, [sessions, selectedSession]);
 
-    for (let i = 1; i < selectedLogs.length; i++) {
-      const currentLog = selectedLogs[i];
-      const segmentKm = distanceKm(
-        { latitude: Number(lastValidLog.latitude), longitude: Number(lastValidLog.longitude) },
-        { latitude: Number(currentLog.latitude), longitude: Number(currentLog.longitude) },
+  // Simplify each patrol session separately.
+  const routeFeatures = useMemo(() => {
+    return activeSessions
+      .map((session) => {
+        // Exclude invalid coordinates and hidden-duty 0,0 locations.
+        const validPoints = session.logs.filter((log) => {
+          const lat = Number(log.latitude);
+          const lon = Number(log.longitude);
+
+          return (
+            Number.isFinite(lat) &&
+            Number.isFinite(lon) &&
+            lat >= -90 &&
+            lat <= 90 &&
+            lon >= -180 &&
+            lon <= 180 &&
+            !(lat === 0 && lon === 0)
+          );
+        });
+
+        const simplifiedPoints = simplifyDouglasPeucker(
+          validPoints,
+          ROUTE_SIMPLIFY_TOLERANCE_METERS,
+        );
+
+        if (simplifiedPoints.length < 2) return null;
+
+        return {
+          type: "Feature" as const,
+          id: session.id,
+          geometry: {
+            type: "LineString" as const,
+            coordinates: simplifiedPoints.map((log) => [
+              Number(log.longitude),
+              Number(log.latitude),
+            ]),
+          },
+          properties: {},
+        };
+      })
+      .filter(
+        (feature): feature is NonNullable<typeof feature> => feature !== null,
+      );
+  }, [activeSessions]);
+
+  // Preserve the actual beginning and ending points of the selected routes.
+  const startPointFeature = useMemo(() => {
+    const firstSession = activeSessions.find(
+      (session) => session.logs.length > 0,
+    );
+
+    const log = firstSession?.logs.find((item) => {
+      const lat = Number(item.latitude);
+      const lon = Number(item.longitude);
+
+      return (
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lon >= -180 &&
+        lon <= 180 &&
+        !(lat === 0 && lon === 0)
+      );
+    });
+
+    return log
+      ? {
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [Number(log.longitude), Number(log.latitude)],
+          },
+          properties: {},
+        }
+      : null;
+  }, [activeSessions]);
+
+  const lastPointFeature = useMemo(() => {
+    const lastSession = [...activeSessions]
+      .reverse()
+      .find((session) => session.logs.length > 0);
+
+    const log = [...(lastSession?.logs ?? [])]
+      .reverse()
+      .find(
+        (item) => Number(item.latitude) !== 0 || Number(item.longitude) !== 0,
       );
 
-      // Keep point if it's more than 5 meters away from last valid point
-      if (segmentKm * 1000 >= MIN_SEGMENT_METERS) {
-        filtered.push(currentLog);
-        lastValidLog = currentLog;
-      }
-    }
-
-    return filtered;
-  }, [selectedLogs]);
+    return log
+      ? {
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [Number(log.longitude), Number(log.latitude)],
+          },
+          properties: {},
+        }
+      : null;
+  }, [activeSessions]);
 
   const formatDuration = (ms: number): string => {
     const totalMinutes = Math.round(ms / 60000);
@@ -265,36 +467,6 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
     return { km, durationMs };
   }, [sessions, selectedSession]);
 
-  const routeFeature = useMemo(() => {
-    const coordinates = filteredLogs.map((log) => [
-      Number(log.longitude),
-      Number(log.latitude),
-    ]);
-    return {
-      type: "Feature" as const,
-      geometry: { type: "LineString" as const, coordinates },
-      properties: {},
-    };
-  }, [filteredLogs]);
-
-  const startPointFeature = useMemo(() => {
-    const log = filteredLogs[0];
-    return log ? {
-      type: "Feature" as const,
-      geometry: { type: "Point" as const, coordinates: [Number(log.longitude), Number(log.latitude)] },
-      properties: {},
-    } : null;
-  }, [filteredLogs]);
-
-  const lastPointFeature = useMemo(() => {
-    const log = filteredLogs[filteredLogs.length - 1];
-    return filteredLogs.length > 1 && log ? {
-      type: "Feature" as const,
-      geometry: { type: "Point" as const, coordinates: [Number(log.longitude), Number(log.latitude)] },
-      properties: {},
-    } : null;
-  }, [filteredLogs]);
-
   const styles = useMemo(() => getStyles(isDarkTheme), [isDarkTheme]);
 
   if (sortedLogs.length === 0) {
@@ -303,11 +475,25 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
         <View style={styles.emptyContainer}>
           <Ionicons name="map-outline" size={42} color="#64748B" />
           <Text style={styles.emptyTitle}>No Patrol Logs</Text>
-          <Text style={styles.emptyText}>There are no GPS patrol logs available.</Text>
+          <Text style={styles.emptyText}>
+            There are no GPS patrol logs available.
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
+
+  // Auto-zoom to selected logs bounds when they change.
+  useEffect(() => {
+    if (!cameraRef.current || selectedLogs.length < 2) return;
+    const lats = selectedLogs.map((l) => Number(l.latitude));
+    const lons = selectedLogs.map((l) => Number(l.longitude));
+    cameraRef.current.fitBounds(
+      [Math.max(...lons), Math.max(...lats)],
+      [Math.min(...lons), Math.min(...lats)],
+      800,
+    );
+  }, [selectedLogs]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -322,7 +508,10 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
             <Text style={styles.filterLabel}>DATE</Text>
             <Text style={styles.filterValue} numberOfLines={1}>
               {selectedDate
-                ? formatDate(availableDates.find((d) => d.dateKey === selectedDate)?.logs[0].capturedAt || "")
+                ? formatDate(
+                    availableDates.find((d) => d.dateKey === selectedDate)
+                      ?.logs[0].capturedAt || "",
+                  )
                 : "Select Date"}
             </Text>
           </View>
@@ -341,7 +530,9 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
               {selectedSession === "all"
                 ? `All Sessions (${sessions.length})`
                 : (() => {
-                    const session = sessions.find((s) => s.id === selectedSession);
+                    const session = sessions.find(
+                      (s) => s.id === selectedSession,
+                    );
                     return session
                       ? `Session ${session.sessionNumber} · ${session.dutyType || ""}`
                       : "All Sessions";
@@ -355,7 +546,7 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
       <View style={styles.mapContainer}>
         <MapView
           style={StyleSheet.absoluteFillObject}
-          mapStyle={MAP_STYLE_URL}
+          mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
           logoEnabled={false}
         >
           <Camera
@@ -366,10 +557,10 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
             }}
           />
 
-          {routeFeature.geometry.coordinates.length >= 2 && (
-            <ShapeSource id="routeSource" shape={routeFeature}>
+          {routeFeatures.map((feature) => (
+            <ShapeSource key={feature.id} id={feature.id} shape={feature}>
               <LineLayer
-                id="routeLayer"
+                id={`${feature.id}-line`}
                 style={{
                   lineColor: isDarkTheme ? "#60A5FA" : "#2563EB",
                   lineWidth: 5,
@@ -378,8 +569,7 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
                 }}
               />
             </ShapeSource>
-          )}
-
+          ))}
           {startPointFeature && (
             <ShapeSource id="startPointSource" shape={startPointFeature}>
               <CircleLayer
@@ -393,7 +583,6 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
               />
             </ShapeSource>
           )}
-
           {lastPointFeature && (
             <ShapeSource id="lastPointSource" shape={lastPointFeature}>
               <CircleLayer
@@ -408,38 +597,6 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
             </ShapeSource>
           )}
         </MapView>
-
-        <View style={styles.logCount}>
-          <Ionicons name="location" size={14} color="#FFFFFF" />
-          <Text style={styles.logCountText}>{selectedLogs.length.toLocaleString()} points</Text>
-        </View>
-
-        <View style={styles.sessionCount}>
-          <Ionicons name="layers" size={13} color="#FFFFFF" />
-          <Text style={styles.sessionCountText}>
-            {selectedSession === "all" ? `${sessions.length} sessions` : "1 session"}
-          </Text>
-        </View>
-
-        <View style={styles.patrolStatsCard}>
-          <View style={styles.patrolStatBox}>
-            <Ionicons name="speedometer-outline" size={20} color={theme.blue} />
-            <View style={styles.patrolStatTextBox}>
-              <Text style={styles.patrolStatLabel}>Kilometer Patrolled</Text>
-              <Text style={styles.patrolStatValue}>{patrolStats.km.toFixed(2)} km</Text>
-            </View>
-          </View>
-
-          <View style={styles.patrolStatDivider} />
-
-          <View style={styles.patrolStatBox}>
-            <Ionicons name="time-outline" size={20} color={theme.blue} />
-            <View style={styles.patrolStatTextBox}>
-              <Text style={styles.patrolStatLabel}>Hours Patrolled</Text>
-              <Text style={styles.patrolStatValue}>{formatDuration(patrolStats.durationMs)}</Text>
-            </View>
-          </View>
-        </View>
       </View>
 
       <Modal
@@ -453,9 +610,14 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>Select Date</Text>
-                <Text style={styles.modalSubtitle}>Choose the patrol date to display</Text>
+                <Text style={styles.modalSubtitle}>
+                  Choose the patrol date to display
+                </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowDatePicker(false)} style={styles.modalClose}>
+              <TouchableOpacity
+                onPress={() => setShowDatePicker(false)}
+                style={styles.modalClose}
+              >
                 <Ionicons name="close" size={20} color="#64748B" />
               </TouchableOpacity>
             </View>
@@ -478,10 +640,17 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
                     color={active ? "#2563EB" : "#94A3B8"}
                   />
                   <View style={styles.optionContent}>
-                    <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>
+                    <Text
+                      style={[
+                        styles.optionTitle,
+                        active && styles.optionTitleActive,
+                      ]}
+                    >
                       {formatDate(item.logs[0].capturedAt)}
                     </Text>
-                    <Text style={styles.optionSubtitle}>{item.logs.length.toLocaleString()} GPS points</Text>
+                    <Text style={styles.optionSubtitle}>
+                      {item.logs.length.toLocaleString()} GPS points
+                    </Text>
                   </View>
                 </TouchableOpacity>
               );
@@ -497,66 +666,95 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
         onRequestClose={() => setShowSessionPicker(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { maxHeight: "80%" }]}>
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>Select Session</Text>
-                <Text style={styles.modalSubtitle}>A new session starts after 10 minutes</Text>
+                <Text style={styles.modalSubtitle}>
+                  A new session starts after 10 minutes
+                </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowSessionPicker(false)} style={styles.modalClose}>
+
+              <TouchableOpacity
+                onPress={() => setShowSessionPicker(false)}
+                style={styles.modalClose}
+              >
                 <Ionicons name="close" size={20} color="#64748B" />
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[styles.optionRow, selectedSession === "all" && styles.optionRowActive]}
-              onPress={() => {
-                setSelectedSession("all");
-                setShowSessionPicker(false);
-              }}
+            <ScrollView
+              style={{ flexGrow: 0, flexShrink: 1 }}
+              showsVerticalScrollIndicator={true}
+              persistentScrollbar={true}
+              nestedScrollEnabled={true}
+              keyboardShouldPersistTaps="handled"
             >
-              <Ionicons
-                name={selectedSession === "all" ? "radio-button-on" : "radio-button-off"}
-                size={20}
-                color={selectedSession === "all" ? "#2563EB" : "#94A3B8"}
-              />
-              <View style={styles.optionContent}>
-                <Text
-                  style={[
-                    styles.optionTitle,
-                    selectedSession === "all" && styles.optionTitleActive,
-                  ]}
-                >
-                  All Sessions
-                </Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.optionRow,
+                  selectedSession === "all" && styles.optionRowActive,
+                ]}
+                onPress={() => {
+                  setSelectedSession("all");
+                  setShowSessionPicker(false);
+                }}
+              >
+                <Ionicons
+                  name={
+                    selectedSession === "all"
+                      ? "radio-button-on"
+                      : "radio-button-off"
+                  }
+                  size={20}
+                  color={selectedSession === "all" ? "#2563EB" : "#94A3B8"}
+                />
+                <View style={styles.optionContent}>
+                  <Text
+                    style={[
+                      styles.optionTitle,
+                      selectedSession === "all" && styles.optionTitleActive,
+                    ]}
+                  >
+                    All Sessions
+                  </Text>
+                </View>
+              </TouchableOpacity>
 
-            {sessions.map((session) => {
-              const active = session.id === selectedSession;
-              return (
-                <TouchableOpacity
-                  key={session.id}
-                  style={[styles.optionRow, active && styles.optionRowActive]}
-                  onPress={() => {
-                    setSelectedSession(session.id);
-                    setShowSessionPicker(false);
-                  }}
-                >
-                  <Ionicons
-                    name={active ? "radio-button-on" : "radio-button-off"}
-                    size={20}
-                    color={active ? "#2563EB" : "#94A3B8"}
-                  />
-                  <View style={styles.optionContent}>
-                    <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>
-                      Session {session.sessionNumber}
-                    </Text>
-                    <Text style={styles.optionSubtitle}>{session.dutyType || ""}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+              {sessions.map((session) => {
+                const active = session.id === selectedSession;
+
+                return (
+                  <TouchableOpacity
+                    key={session.id}
+                    style={[styles.optionRow, active && styles.optionRowActive]}
+                    onPress={() => {
+                      setSelectedSession(session.id);
+                      setShowSessionPicker(false);
+                    }}
+                  >
+                    <Ionicons
+                      name={active ? "radio-button-on" : "radio-button-off"}
+                      size={20}
+                      color={active ? "#2563EB" : "#94A3B8"}
+                    />
+                    <View style={styles.optionContent}>
+                      <Text
+                        style={[
+                          styles.optionTitle,
+                          active && styles.optionTitleActive,
+                        ]}
+                      >
+                        Session {session.sessionNumber}
+                      </Text>
+                      <Text style={styles.optionSubtitle}>
+                        {session.dutyType || ""}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>

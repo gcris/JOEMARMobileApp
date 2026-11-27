@@ -8,21 +8,46 @@ interface TopCommandHeaderProps {
   onLogout: () => void;
   isDarkTheme: boolean;
   onToggleTheme: () => void;
+  patrolStatus: {
+    running: boolean;
+    dutyType: string;
+    personnelId: string;
+    totalLocations: number;
+    unsyncedLocations: number;
+    syncedLocations: number;
+    startedAt: number;
+  };
 }
 
 export const TopCommandHeader = ({
   onLogout,
   isDarkTheme,
   onToggleTheme,
+  patrolStatus,
 }: TopCommandHeaderProps) => {
   const styles = getStyles(isDarkTheme);
   const isCloud = isSupabaseConfigured();
 
   const handleLogoutPress = () => {
-    Alert.alert("Sign out", "Are you sure you want to sign out?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Confirm", style: "destructive", onPress: onLogout },
-    ]);
+    const isRunning = patrolStatus?.running ?? false;
+    const message = isRunning
+      ? "You are currently on an active patrol. Signing out will stop patrol tracking and remove you from the patrol list. This will discard unsaved patrol data unless you sync first. Are you sure you want to sign out?"
+      : "Are you sure you want to sign out?";
+
+    Alert.alert(
+      "Sign out",
+      message,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: () => {
+            onLogout();
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -30,13 +55,15 @@ export const TopCommandHeader = ({
       <View style={styles.navLeading}>
         {/* Connection status indicator dot */}
         <View
-          style={{
-            width: 10,
-            height: 10,
-            borderRadius: 5,
-            backgroundColor: isCloud ? "#10B981" : "#EAB308",
-            marginRight: 10,
-          }}
+          style={
+            {
+              width: 10,
+              height: 10,
+              borderRadius: 5,
+              backgroundColor: isCloud ? "#10B981" : "#EAB308",
+              marginRight: 10,
+            }
+          }
         />
         <View>
           <Text style={[styles.navTitle, { fontSize: 18, letterSpacing: 0.5 }]}>

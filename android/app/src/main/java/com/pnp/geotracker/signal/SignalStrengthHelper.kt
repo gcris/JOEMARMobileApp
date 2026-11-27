@@ -7,8 +7,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
 import android.telephony.CellInfo
-import android.telephony.CellSignalStrengthLte
-import android.telephony.CellSignalStrengthNr
+import android.telephony.CellInfoCdma
+import android.telephony.CellInfoGsm
+import android.telephony.CellInfoLte
+import android.telephony.CellInfoWcdma
 import android.telephony.TelephonyManager
 
 data class NetworkSignal(
@@ -60,28 +62,14 @@ object SignalStrengthHelper {
                 if (registeredCell == null) {
                     null
                 } else {
-
-                    val strength = registeredCell.cellSignalStrength
-
-                    val networkType = when {
-
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                            strength is CellSignalStrengthNr -> "5G"
-
-                        strength is CellSignalStrengthLte -> "LTE"
-
-                        else -> "CELLULAR"
-                    }
-
-                    NetworkSignal(
-                        networkType = networkType,
-                        dbm = strength.dbm,
-                        level = strength.level.coerceIn(0, 4)
-                    )
+                    getSignalFromCell(registeredCell)
                 }
             }
 
         } catch (e: SecurityException) {
+            null
+        } catch (e: LinkageError) {
+            // Prevent unavailable Android APIs from crashing patrol tracking.
             null
         } catch (e: Exception) {
             null
@@ -91,6 +79,54 @@ object SignalStrengthHelper {
         lastReadTime = now
 
         return result
+    }
+
+    private fun getSignalFromCell(cell: CellInfo): NetworkSignal? {
+
+        return when (cell) {
+
+            is CellInfoLte -> {
+                val strength = cell.cellSignalStrength
+
+                NetworkSignal(
+                    networkType = "LTE",
+                    dbm = strength.dbm,
+                    level = strength.level.coerceIn(0, 4)
+                )
+            }
+
+            is CellInfoGsm -> {
+                val strength = cell.cellSignalStrength
+
+                NetworkSignal(
+                    networkType = "CELLULAR",
+                    dbm = strength.dbm,
+                    level = strength.level.coerceIn(0, 4)
+                )
+            }
+
+            is CellInfoWcdma -> {
+                val strength = cell.cellSignalStrength
+
+                NetworkSignal(
+                    networkType = "CELLULAR",
+                    dbm = strength.dbm,
+                    level = strength.level.coerceIn(0, 4)
+                )
+            }
+
+            is CellInfoCdma -> {
+                val strength = cell.cellSignalStrength
+
+                NetworkSignal(
+                    networkType = "CELLULAR",
+                    dbm = strength.dbm,
+                    level = strength.level.coerceIn(0, 4)
+                )
+            }
+
+            else -> null
+        }
     }
 
     fun getSignalLevel(context: Context): Int {
