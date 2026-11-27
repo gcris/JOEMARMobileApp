@@ -27,8 +27,30 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios
-          # Update platform :ios, '...' regardless of which version prebuild wrote
-          sed -i '' -E "s/platform :ios, '[0-9.]+'/platform :ios, '15.1'/g" Podfile
+          echo "--- Before patch ---"
+          head -n 15 Podfile
+          cat Podfile.properties.json || true
+
+          # 1. Replace any platform :ios, '...' line (single or double quotes, with or without spaces)
+          sed -i '' -E "s/platform[[:space:]]+:ios,[[:space:]]*['\"][0-9.]+['\"]/platform :ios, '15.1'/g" Podfile
+
+          # 2. If Podfile uses min_ios_version_supported, update it in Podfile or Podfile.properties.json
+          if [ -f Podfile.properties.json ]; then
+            node -e '
+              const fs = require("fs");
+              const p = "Podfile.properties.json";
+              const j = JSON.parse(fs.readFileSync(p, "utf8"));
+              j["ios.deploymentTarget"] = "15.1";
+              fs.writeFileSync(p, JSON.stringify(j, null, 2));
+            '
+          fi
+
+          # Also override min_ios_version_supported in Podfile if present
+          sed -i '' -E "s/min_ios_version_supported[[:space:]]*=[[:space:]]*['\"][0-9.]+['\"]/min_ios_version_supported = '15.1'/g" Podfile
+
+          echo "--- After patch ---"
+          head -n 15 Podfile
+
           pod install
       - name: Build unsigned iOS Simulator .app
         script: |
