@@ -4,6 +4,8 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - joemar_env
       node: 22
       xcode: latest
       cocoapods: default
@@ -21,6 +23,13 @@ workflows:
       - name: Install JavaScript dependencies
         script: |
           npm ci || npm install
+      - name: Patch expo-dev-menu simulator macro
+        script: |
+          FILE="node_modules/expo-dev-menu/ios/DevMenuViewController.swift"
+          if [ -f "$FILE" ]; then
+            sed -i '' 's/TARGET_IPHONE_SIMULATOR/TARGET_OS_SIMULATOR/g' "$FILE"
+            grep -n "TARGET_OS_SIMULATOR" "$FILE" || true
+          fi
       - name: Generate native iOS project (Expo Prebuild)
         script: |
           npx expo prebuild --platform ios --non-interactive
