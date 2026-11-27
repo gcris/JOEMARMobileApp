@@ -1,0 +1,10 @@
+workflows:
+  ios-check:
+    name: iOS Build Check
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    scripts:
+      - name: Check environment
+        script: |
+          echo "codemagic.yaml loaded successfully"
+          xcodebuild -version
