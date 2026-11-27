@@ -27,8 +27,17 @@ workflows:
         script: |
           FILE="node_modules/expo-dev-menu/ios/DevMenuViewController.swift"
           if [ -f "$FILE" ]; then
-            sed -i '' 's/TARGET_IPHONE_SIMULATOR/TARGET_OS_SIMULATOR/g' "$FILE"
-            grep -n "TARGET_OS_SIMULATOR" "$FILE" || true
+            node -e '
+              const fs = require("fs");
+              const file = process.argv[1];
+              let content = fs.readFileSync(file, "utf8");
+              content = content.replace(
+                /let\s+isSimulator\s*=\s*TARGET_(?:OS|IPHONE)_SIMULATOR\s*>\s*0/,
+                `#if targetEnvironment(simulator)\n    let isSimulator = true\n    #else\n    let isSimulator = false\n    #endif`
+              );
+              fs.writeFileSync(file, content, "utf8");
+            ' "$FILE"
+            grep -n -C 3 "isSimulator" "$FILE" || true
           fi
       - name: Generate native iOS project (Expo Prebuild)
         script: |
