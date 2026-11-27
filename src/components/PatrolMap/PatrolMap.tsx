@@ -483,17 +483,30 @@ export const PatrolMap: React.FC<PatrolMapProps> = ({ logs, isDarkTheme }) => {
     );
   }
 
-  // Auto-zoom to selected logs bounds when they change.
+  // Auto-zoom/follow latest log
   useEffect(() => {
-    if (!cameraRef.current || selectedLogs.length < 2) return;
-    const lats = selectedLogs.map((l) => Number(l.latitude));
-    const lons = selectedLogs.map((l) => Number(l.longitude));
-    cameraRef.current.fitBounds(
-      [Math.max(...lons), Math.max(...lats)],
-      [Math.min(...lons), Math.min(...lats)],
-      800,
-    );
-  }, [selectedLogs]);
+    if (!cameraRef.current || selectedLogs.length === 0) return;
+
+    const latestLog = selectedLogs[selectedLogs.length - 1];
+
+    // Only auto-follow if user is viewing the latest data
+    if (selectedSession === "all") {
+      cameraRef.current.setCamera({
+        centerCoordinate: [Number(latestLog.longitude), Number(latestLog.latitude)],
+        zoomLevel: 16,
+        animationDuration: 1000,
+      });
+    } else {
+      // Keep existing fitBounds behavior for historical/specific session viewing
+      const lats = selectedLogs.map((l) => Number(l.latitude));
+      const lons = selectedLogs.map((l) => Number(l.longitude));
+      cameraRef.current.fitBounds(
+        [Math.max(...lons), Math.max(...lats)],
+        [Math.min(...lons), Math.min(...lats)],
+        800,
+      );
+    }
+  }, [selectedLogs, selectedSession]);
 
   return (
     <SafeAreaView style={styles.container}>
